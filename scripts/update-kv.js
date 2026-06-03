@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import { parseVlessUri } from "../src/parser/vless.js";
+import { formatEdgeNodeName } from "../src/utils/colo.js";
 import { getPortsForSecurity } from "../src/utils/ports.js";
 import { checkCandidates } from "./lib/check.js";
 import { collectCandidates } from "./lib/candidates.js";
@@ -25,8 +26,7 @@ async function readTextFile(path, fallback = "") {
 }
 
 function edgeName(item, index) {
-  const colo = item.colo ? `${item.colo} ` : "";
-  return `CF Edge ${colo}${item.latency}ms #${index + 1}`;
+  return formatEdgeNodeName(item, index);
 }
 
 export async function buildUpdatePayload({ originalNode, manualText, remoteSources, checkOne, previousBestIps = null, now = new Date() }) {

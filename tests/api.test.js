@@ -55,8 +55,8 @@ test("sub generates Clash subscription with token", async () => {
   assert.equal(response.headers.get("Content-Type"), "text/yaml; charset=utf-8");
   assert.match(text, /server: "1.1.1.1"/);
   assert.match(text, /server: "1.1.1.2"/);
-  assert.match(text, /CF Edge LAX-12ms-#1/);
-  assert.match(text, /CF Edge SJC-34ms-#2/);
+  assert.match(text, /🇺🇸 美国洛杉矶 LAX 12ms #1/);
+  assert.match(text, /🇺🇸 美国圣何塞 SJC 34ms #2/);
   assert.doesNotMatch(text, /1\.1\.1\.3/);
 });
 
@@ -72,7 +72,7 @@ test("sub supports bearer token and Sing-box output", async () => {
   assert.equal(response.status, 200);
   assert.equal(parsed.outbounds.length, 1);
   assert.equal(parsed.outbounds[0].server, "1.1.1.1");
-  assert.equal(parsed.outbounds[0].tag, "CF Edge LAX-12ms-#1");
+  assert.equal(parsed.outbounds[0].tag, "🇺🇸 美国洛杉矶 LAX 12ms #1");
 });
 
 test("sub generates base64 v2rayNG subscription", async () => {
@@ -85,7 +85,7 @@ test("sub generates base64 v2rayNG subscription", async () => {
   assert.match(decoded, /@1\.1\.1\.1:443/);
   assert.match(decoded, /type=ws/);
   assert.match(decoded, /security=tls/);
-  assert.match(decoded, /#CF%20Edge%20LAX-12ms-%231/);
+  assert.match(decoded, /#%F0%9F%87%BA%F0%9F%87%B8%20%E7%BE%8E%E5%9B%BD%E6%B4%9B%E6%9D%89%E7%9F%B6%20LAX%2012ms%20%231/);
 });
 
 test("template API: missing token returns 401", async () => {

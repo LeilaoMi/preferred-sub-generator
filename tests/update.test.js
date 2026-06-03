@@ -103,7 +103,7 @@ test("build update payload keeps top 50 checked nodes with colo names", async ()
   assert.equal(payload.TEMPLATE.startsWith("vless://"), true);
   assert.equal(bestIps.length, 50);
   assert.equal(bestIps[0].address, "1.1.1.1");
-  assert.equal(bestIps[0].name, "CF Edge LAX 1ms #1");
+  assert.equal(bestIps[0].name, "🇺🇸 美国洛杉矶 LAX 1ms #1");
   assert.equal(bestIps[0].colo, "LAX");
   assert.equal(status.updatedAt, "2026-06-03T00:00:00.000Z");
   assert.equal(status.available, 50);
