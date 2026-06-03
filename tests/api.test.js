@@ -5,6 +5,9 @@ import { handleStatus } from "../src/api/status.js";
 import { handleSub } from "../src/api/sub.js";
 import { handleTemplateGet, handleTemplatePost } from "../src/api/template.js";
 
+const expectedGeneratedName = "🇺🇸 美国洛杉矶 LAX 12ms #1";
+const expectedEncodedGeneratedName = encodeURIComponent(expectedGeneratedName);
+
 const template = "vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=tls&sni=example.com&type=ws&host=example.com&path=%2Fws#原始节点";
 const bestIps = Array.from({ length: 60 }, (_, index) => ({
   address: `1.1.1.${index + 1}`,
@@ -52,14 +55,15 @@ test("sub generates Clash subscription", async () => {
   assert.doesNotMatch(text, /1\.1\.1\.3/);
 });
 
-test("sub supports Sing-box output", async () => {
-  const response = await handleSub(new Request("https://example.com/sub?type=singbox&n=1"), createEnv());
-  const parsed = JSON.parse(await response.text());
+test("sub generates plain VLESS subscription with encoded generated names", async () => {
+  const response = await handleSub(new Request("https://example.com/sub?type=vless&n=1"), createEnv());
+  const text = await response.text();
 
   assert.equal(response.status, 200);
-  assert.equal(parsed.outbounds.length, 1);
-  assert.equal(parsed.outbounds[0].server, "1.1.1.1");
-  assert.equal(parsed.outbounds[0].tag, "🇺🇸 美国洛杉矶 LAX 12ms #1");
+  assert.match(text, /^vless:\/\//);
+  assert.match(text, /@1\.1\.1\.1:443/);
+  assert.match(text, new RegExp(`#${expectedEncodedGeneratedName}$`));
+  assert.equal(decodeURIComponent(new URL(text).hash.slice(1)), expectedGeneratedName);
 });
 
 test("sub generates base64 v2rayNG subscription", async () => {
@@ -72,7 +76,29 @@ test("sub generates base64 v2rayNG subscription", async () => {
   assert.match(decoded, /@1\.1\.1\.1:443/);
   assert.match(decoded, /type=ws/);
   assert.match(decoded, /security=tls/);
-  assert.match(decoded, /#%F0%9F%87%BA%F0%9F%87%B8%20%E7%BE%8E%E5%9B%BD%E6%B4%9B%E6%9D%89%E7%9F%B6%20LAX%2012ms%20%231/);
+  assert.match(decoded, new RegExp(`#${expectedEncodedGeneratedName}$`));
+  assert.equal(decodeURIComponent(new URL(decoded).hash.slice(1)), expectedGeneratedName);
+});
+
+test("sub generates Shadowrocket subscription with encoded generated names", async () => {
+  const response = await handleSub(new Request("https://example.com/sub?type=shadowrocket&n=1"), createEnv());
+  const text = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(text, /^vless:\/\//);
+  assert.match(text, /@1\.1\.1\.1:443/);
+  assert.match(text, new RegExp(`#${expectedEncodedGeneratedName}$`));
+  assert.equal(decodeURIComponent(new URL(text).hash.slice(1)), expectedGeneratedName);
+});
+
+test("sub generates Sing-box subscription with localized generated names", async () => {
+  const response = await handleSub(new Request("https://example.com/sub?type=singbox&n=1"), createEnv());
+  const parsed = JSON.parse(await response.text());
+
+  assert.equal(response.status, 200);
+  assert.equal(parsed.outbounds.length, 1);
+  assert.equal(parsed.outbounds[0].server, "1.1.1.1");
+  assert.equal(parsed.outbounds[0].tag, expectedGeneratedName);
 });
 
 test("template API: GET returns parsed preview", async () => {
