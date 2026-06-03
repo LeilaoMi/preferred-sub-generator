@@ -28,7 +28,6 @@ function createEnv() {
   ]);
 
   return {
-    SUB_TOKEN: "secret-token",
     SUB_KV: {
       async get(key) {
         return data.get(key) || null;
@@ -40,15 +39,8 @@ function createEnv() {
   };
 }
 
-test("sub rejects missing token", async () => {
-  const response = await handleSub(new Request("https://example.com/sub?type=vless"), createEnv());
-
-  assert.equal(response.status, 401);
-  assert.deepEqual(await response.json(), { error: "Unauthorized" });
-});
-
-test("sub generates Clash subscription with token", async () => {
-  const response = await handleSub(new Request("https://example.com/sub?type=clash&token=secret-token&n=2"), createEnv());
+test("sub generates Clash subscription", async () => {
+  const response = await handleSub(new Request("https://example.com/sub?type=clash&n=2"), createEnv());
   const text = await response.text();
 
   assert.equal(response.status, 200);
@@ -60,13 +52,8 @@ test("sub generates Clash subscription with token", async () => {
   assert.doesNotMatch(text, /1\.1\.1\.3/);
 });
 
-test("sub supports bearer token and Sing-box output", async () => {
-  const response = await handleSub(
-    new Request("https://example.com/sub?type=singbox&n=1", {
-      headers: { Authorization: "Bearer secret-token" },
-    }),
-    createEnv(),
-  );
+test("sub supports Sing-box output", async () => {
+  const response = await handleSub(new Request("https://example.com/sub?type=singbox&n=1"), createEnv());
   const parsed = JSON.parse(await response.text());
 
   assert.equal(response.status, 200);
@@ -76,7 +63,7 @@ test("sub supports bearer token and Sing-box output", async () => {
 });
 
 test("sub generates base64 v2rayNG subscription", async () => {
-  const response = await handleSub(new Request("https://example.com/sub?type=v2rayng&token=secret-token&n=1"), createEnv());
+  const response = await handleSub(new Request("https://example.com/sub?type=v2rayng&n=1"), createEnv());
   const encoded = await response.text();
   const decoded = Buffer.from(encoded, "base64").toString("utf8");
 
@@ -88,13 +75,8 @@ test("sub generates base64 v2rayNG subscription", async () => {
   assert.match(decoded, /#%F0%9F%87%BA%F0%9F%87%B8%20%E7%BE%8E%E5%9B%BD%E6%B4%9B%E6%9D%89%E7%9F%B6%20LAX%2012ms%20%231/);
 });
 
-test("template API: missing token returns 401", async () => {
-  const response = await handleTemplateGet(new Request("https://example.com/template"), createEnv());
-  assert.equal(response.status, 401);
-});
-
 test("template API: GET returns parsed preview", async () => {
-  const response = await handleTemplateGet(new Request("https://example.com/template?token=secret-token"), createEnv());
+  const response = await handleTemplateGet(new Request("https://example.com/template"), createEnv());
   const parsed = await response.json();
 
   assert.equal(response.status, 200);
@@ -106,7 +88,7 @@ test("template API: GET returns parsed preview", async () => {
 test("template API: POST saves new vless and returns parsed", async () => {
   const env = createEnv();
   const response = await handleTemplatePost(
-    new Request("https://example.com/template?token=secret-token", {
+    new Request("https://example.com/template", {
       method: "POST",
       body: JSON.stringify({
         template: "vless://22222222-2222-4222-8222-222222222222$new.example:443?encryption=none&security=tls&sni=new.example&type=ws&host=new.example&path=%2Fnew#新节点".replace("$", "@"),
@@ -125,7 +107,7 @@ test("template API: POST saves new vless and returns parsed", async () => {
 });
 
 test("best limits nodes to 50", async () => {
-  const response = await handleBest(new Request("https://example.com/best?token=secret-token&n=999"), createEnv());
+  const response = await handleBest(new Request("https://example.com/best?n=999"), createEnv());
   const parsed = await response.json();
 
   assert.equal(response.status, 200);

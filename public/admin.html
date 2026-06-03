@@ -73,9 +73,6 @@
       <h1>订阅配置</h1>
       <p>这里用于更换你的原始 VLESS 模板。保存后，现有优选 IP 会继续复用新的 UUID、Host、SNI、路径和 TLS 设置。</p>
 
-      <label for="token">访问 token</label>
-      <input id="token" type="password" placeholder="粘贴你的订阅 token" autocomplete="off" />
-
       <label for="template">原始 VLESS 链接</label>
       <textarea id="template" placeholder="vless://..."></textarea>
 
@@ -83,17 +80,15 @@
       <button id="preview" class="secondary">解析预览</button>
       <button id="save">保存模板</button>
 
-      <div id="message" class="status">请先填写 token，或用 /admin.html?token=你的token 打开。</div>
+      <div id="message" class="status">可读取或保存当前 VLESS 模板。</div>
       <div id="previewBox" class="grid"></div>
     </section>
   </main>
 
   <script>
-    const tokenInput = document.getElementById("token");
     const templateInput = document.getElementById("template");
     const message = document.getElementById("message");
     const previewBox = document.getElementById("previewBox");
-    tokenInput.value = new URL(location.href).searchParams.get("token") || "";
 
     function setMessage(text, type = "") {
       message.textContent = text;
@@ -111,9 +106,7 @@
     }
 
     async function requestTemplate(method, body) {
-      const token = tokenInput.value.trim();
-      if (!token) throw new Error("请先填写 token");
-      const response = await fetch(`/api/template?token=${encodeURIComponent(token)}`, {
+      const response = await fetch("/api/template", {
         method,
         headers: { "Content-Type": "application/json" },
         body: body ? JSON.stringify(body) : undefined,

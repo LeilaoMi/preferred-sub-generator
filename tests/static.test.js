@@ -2,27 +2,26 @@ import fs from "node:fs/promises";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-test("homepage is Chinese, builds subscription URLs, and does not expose a real token", async () => {
+test("homepage is Chinese, builds tokenless subscription URLs", async () => {
   const html = await fs.readFile(new URL("../public/index.html", import.meta.url), "utf8");
 
   assert.match(html, /<html lang="zh-CN">/);
   assert.match(html, /优选订阅生成器/);
   assert.match(html, /节点链接/);
   assert.match(html, /生成优选订阅/);
-  assert.match(html, /粘贴你的私有 token/);
   assert.match(html, /默认格式/);
   assert.match(html, /\/status/);
-  assert.match(html, /\/sub\?type=v2rayng&token=/);
+  assert.match(html, /\/sub\?type=v2rayng/);
   assert.match(html, /location\.origin/);
   assert.match(html, /api\/template/);
   assert.match(html, /已保存节点模板/);
-  assert.equal((html.match(/id="token"/g) || []).length, 1);
+  assert.equal((html.match(/id="token"/g) || []).length, 0);
   assert.equal((html.match(/id="subscriptionList"/g) || []).length, 1);
   assert.match(html, /复制/);
   assert.doesNotMatch(html, /secret-token/);
 });
 
-test("admin page is Chinese and contains api/template, preview, and save template, but does not expose secret-token", async () => {
+test("admin page is Chinese and contains tokenless api/template, preview, and save template", async () => {
   const html = await fs.readFile(new URL("../public/admin.html", import.meta.url), "utf8");
 
   assert.match(html, /订阅配置/);
@@ -46,6 +45,5 @@ test("deploy checklist contains required secrets and safety checks", async () =>
 
   assert.match(checklist, /CLOUDFLARE_API_TOKEN/);
   assert.match(checklist, /网页输入/);
-  assert.match(checklist, /SUB_TOKEN/);
-  assert.match(checklist, /没有把真实 token 写进代码/);
+  assert.match(checklist, /无需 token/);
 });

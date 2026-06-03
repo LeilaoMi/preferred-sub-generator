@@ -2,8 +2,7 @@ import { generateClashSubscription } from "../generator/clash.js";
 import { generateShadowrocketSubscription } from "../generator/shadowrocket.js";
 import { generateSingboxSubscription } from "../generator/singbox.js";
 import { generateVlessUri } from "../generator/vless.js";
-import { isAuthorized } from "../security/auth.js";
-import { jsonResponse, textResponse, unauthorizedResponse } from "../utils/response.js";
+import { jsonResponse, textResponse } from "../utils/response.js";
 import { formatEdgeNodeName } from "../utils/colo.js";
 import { readBestIps, readTemplate } from "./kv.js";
 
@@ -31,8 +30,6 @@ function base64Encode(text) {
 }
 
 export async function handleSub(request, env) {
-  if (!isAuthorized(request, env)) return unauthorizedResponse();
-
   const url = new URL(request.url);
   const type = (url.searchParams.get("type") || "vless").toLowerCase();
   const template = await readTemplate(env.SUB_KV);

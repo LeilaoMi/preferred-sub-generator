@@ -37,7 +37,7 @@
   - `/sub`
   - `/best`
   - `/api/template`
-- `/sub`、`/best`、`/api/template` 使用私有 token 防滥用。
+- `/sub`、`/best`、`/api/template` 默认无需 token，方便网页输入后直接复制到客户端。
 - GitHub Actions 可每 6 小时自动刷新 Cloudflare KV 中的优选 IP。
 - 不引入 ProxyIP、SOCKS5、NAT64、中转 IP 或公益节点混合源。
 
@@ -154,18 +154,9 @@ KV 绑定变量名：SUB_KV
 Cloudflare Pages 生产环境需要设置：
 
 ```text
-SUB_TOKEN=你的私有访问 token
 ```
 
-这个 token 用于访问：
-
-```text
-/sub?type=v2rayng&token=你的私有访问token
-/api/template?token=你的私有访问token
-/best?n=20&token=你的私有访问token
-```
-
-不要把 `SUB_TOKEN` 写进代码、README 或公开页面。
+订阅接口默认无需 token。请不要把部署域名公开给不信任的人。
 
 ## 部署到 Cloudflare Pages
 
@@ -210,7 +201,6 @@ Namespace：你创建的 KV
 7. 添加生产环境变量：
 
 ```text
-SUB_TOKEN=你的私有访问 token
 ```
 
 8. 部署。
@@ -257,7 +247,7 @@ Account → Workers KV Storage → Edit
 Account → Account Settings → Read
 ```
 
-用于 Pages 部署的 token 还需要：
+用于 Pages 部署的 Cloudflare API Token 还需要：
 
 ```text
 Account → Cloudflare Pages → Edit
@@ -274,11 +264,10 @@ https://你的域名/
 ```
 
 2. 粘贴原始 VLESS 链接。
-3. 输入 `SUB_TOKEN`。
-4. 选择默认格式，例如 `v2rayNG`。
-5. 点击“生成优选订阅”。
-6. 页面会先把原始 VLESS 保存到 KV 的 `TEMPLATE`，再生成订阅地址。
-7. 复制 v2rayNG / Clash / Sing-box / Shadowrocket 对应订阅地址导入客户端。
+3. 选择默认格式，例如 `v2rayNG`。
+4. 点击“生成优选订阅”。
+5. 页面会先把原始 VLESS 保存到 KV 的 `TEMPLATE`，再生成订阅地址。
+6. 复制 v2rayNG / Clash / Sing-box / Shadowrocket 对应订阅地址导入客户端。
 
 ## 与 edgetunnel 2.0 配合
 
@@ -305,11 +294,11 @@ GET /status
 ### 订阅
 
 ```text
-GET /sub?type=vless&token=你的token
-GET /sub?type=v2rayng&token=你的token
-GET /sub?type=clash&token=你的token
-GET /sub?type=singbox&token=你的token
-GET /sub?type=shadowrocket&token=你的token
+GET /sub?type=vless
+GET /sub?type=v2rayng
+GET /sub?type=clash
+GET /sub?type=singbox
+GET /sub?type=shadowrocket
 ```
 
 可选参数：
@@ -321,7 +310,7 @@ n=20   限制返回节点数量，最多 50
 ### 优选列表
 
 ```text
-GET /best?n=20&token=你的token
+GET /best?n=20
 ```
 
 返回当前 KV 中的优选节点 JSON。
@@ -329,8 +318,8 @@ GET /best?n=20&token=你的token
 ### 模板配置
 
 ```text
-GET  /api/template?token=你的token
-POST /api/template?token=你的token
+GET  /api/template
+POST /api/template
 ```
 
 POST body：
@@ -419,22 +408,18 @@ npm run preflight
 - Shadowrocket 输出
 - CloudflareSpeedTest CSV 源解析
 - COLO 中文节点名
-- API 鉴权
+- 访问控制
 - 部署前检查
 
 ## 上线后验证
 
 ```bash
 curl https://你的域名/status
-curl "https://你的域名/sub?type=v2rayng&token=你的token"
-curl "https://你的域名/best?n=20&token=你的token"
+curl "https://你的域名/sub?type=v2rayng"
+curl "https://你的域名/best?n=20"
 ```
 
-错误 token 应返回：
-
-```text
-401 Unauthorized
-```
+订阅接口默认无需 token。便利性优先，但请不要公开部署域名。
 
 如果 `/sub` 返回没有可用节点，先确认 GitHub Actions 是否已经成功刷新 `BEST_IPS`，或者手动触发一次 Actions。
 

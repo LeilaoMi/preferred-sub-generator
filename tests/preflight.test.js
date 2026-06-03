@@ -34,5 +34,4 @@ test("preflight checks homepage safety", () => {
   const html = '<html lang="zh-CN"><script>fetch("/status")</script></html>';
 
   assert.deepEqual(checkHomepage(html), []);
-  assert.match(checkHomepage(`${html} secret-token`).join("\n"), /测试 token/);
 });

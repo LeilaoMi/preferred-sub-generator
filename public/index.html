@@ -172,16 +172,12 @@
       <div class="generator">
         <div class="badge">⚡ 单用户私用版 · 粘贴节点即可生成</div>
         <h1>优选订阅生成器</h1>
-        <p>粘贴你的 VLESS 节点链接，选择客户端格式，输入私有 token，一键生成可复制的优选订阅地址。</p>
+        <p>粘贴你的 VLESS 节点链接，选择客户端格式，一键生成可复制的优选订阅地址。</p>
 
         <label for="nodeLink">节点链接</label>
         <textarea id="nodeLink" placeholder="粘贴 vless:// 节点链接，或粘贴原始订阅中的单条节点"></textarea>
 
         <div class="form-grid">
-          <div>
-            <label for="token">私有 token</label>
-            <input id="token" type="password" placeholder="粘贴你的私有 token" autocomplete="off">
-          </div>
           <div>
             <label for="format">默认格式</label>
             <select id="format">
@@ -195,7 +191,7 @@
         </div>
 
         <div class="actions">
-          <p class="hint">提示：点击生成会把当前 VLESS 节点保存为模板；页面不会把真实 token 写进代码。</p>
+          <p class="hint">提示：点击生成会把当前 VLESS 节点保存为模板；请勿把页面地址公开给不信任的人。</p>
           <button id="generate" type="button">生成优选订阅</button>
         </div>
 
@@ -230,27 +226,18 @@
 
   <script>
     const subscriptions = [
-      ["VLESS", "/sub?type=vless&token="],
-      ["v2rayNG", "/sub?type=v2rayng&token="],
-      ["Clash", "/sub?type=clash&token="],
-      ["Sing-box", "/sub?type=singbox&token="],
-      ["Shadowrocket", "/sub?type=shadowrocket&token="],
-      ["优选列表", "/best?n=20&token="],
+      ["VLESS", "/sub?type=vless"],
+      ["v2rayNG", "/sub?type=v2rayng"],
+      ["Clash", "/sub?type=clash"],
+      ["Sing-box", "/sub?type=singbox"],
+      ["Shadowrocket", "/sub?type=shadowrocket"],
+      ["优选列表", "/best?n=20"],
     ];
-    const tokenInput = document.getElementById("token");
     const nodeLinkInput = document.getElementById("nodeLink");
     const formatSelect = document.getElementById("format");
     const subscriptionList = document.getElementById("subscriptionList");
     const result = document.getElementById("result");
     const resultHint = document.getElementById("resultHint");
-
-    function readTokenFromUrl() {
-      const url = new URL(location.href);
-      return url.searchParams.get("token") || url.hash.replace(/^#token=/, "").trim();
-    }
-    if (!tokenInput.value && readTokenFromUrl()) {
-      tokenInput.value = readTokenFromUrl();
-    }
 
     const formatTime = (value) => {
       if (!value) return "暂无数据";
@@ -259,16 +246,15 @@
       return date.toLocaleString("zh-CN", { hour12: false });
     };
 
-    function buildUrl(path, token) {
-      return `${location.origin}${path}${encodeURIComponent(token || "[请先在输入框填入你的真 token]")}`;
+    function buildUrl(path) {
+      return `${location.origin}${path}`;
     }
 
     function renderSubscriptions() {
-      const token = tokenInput.value.trim();
       const preferredFormat = formatSelect.value;
       const ordered = [...subscriptions].sort(([name, path]) => path.includes(`type=${preferredFormat}`) ? -1 : 1);
       subscriptionList.innerHTML = ordered.map(([name, path], index) => {
-        const fullUrl = buildUrl(path, token);
+        const fullUrl = buildUrl(path);
         return `
           <div class="subscription-item">
             <div class="sub-name">${name}</div>
@@ -292,8 +278,8 @@
       textarea.remove();
     }
 
-    async function saveTemplate(nodeLink, token) {
-      const response = await fetch(`/api/template?token=${encodeURIComponent(token)}`, {
+    async function saveTemplate(nodeLink) {
+      const response = await fetch("/api/template", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ template: nodeLink }),
@@ -306,15 +292,12 @@
 
     document.getElementById("generate").addEventListener("click", async () => {
       const nodeLink = nodeLinkInput.value.trim();
-      const token = tokenInput.value.trim();
       result.classList.add("visible");
       if (!nodeLink.startsWith("vless://")) {
         resultHint.innerHTML = "<span class='danger'>请先粘贴 vless:// 节点链接。</span>";
-      } else if (!token) {
-        resultHint.innerHTML = "<span class='warn'>还没有填写 token。</span> 下面链接会使用占位 token。";
       } else {
         try {
-          await saveTemplate(nodeLink, token);
+          await saveTemplate(nodeLink);
           resultHint.textContent = "已保存节点模板，并生成订阅链接，可直接复制到客户端。";
         } catch (error) {
           resultHint.innerHTML = `<span class='danger'>${error.message}</span>`;
@@ -323,7 +306,6 @@
       renderSubscriptions();
     });
 
-    tokenInput.addEventListener("input", renderSubscriptions);
     formatSelect.addEventListener("change", renderSubscriptions);
     subscriptionList.addEventListener("click", async (event) => {
       const button = event.target.closest("button[data-copy]");

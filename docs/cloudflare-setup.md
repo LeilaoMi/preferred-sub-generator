@@ -32,7 +32,6 @@ KV 绑定变量名：SUB_KV
 Pages 环境变量：
 
 ```text
-SUB_TOKEN    # 私有订阅 token，不要公开
 ```
 
 ## 3. GitHub Secrets
@@ -72,11 +71,11 @@ npm run preflight
 
 ```text
 /status
-/sub?type=vless&token=你的token
-/sub?type=clash&token=你的token
-/sub?type=singbox&token=你的token
-/sub?type=shadowrocket&token=你的token
-/best?n=20&token=你的token
+/sub?type=vless
+/sub?type=clash
+/sub?type=singbox
+/sub?type=shadowrocket
+/best?n=20
 ```
 
-错误 token 请求 `/sub` 应返回 401。
+订阅接口无需 token；请不要公开部署域名。
