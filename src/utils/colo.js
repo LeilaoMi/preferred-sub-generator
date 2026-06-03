@@ -50,8 +50,12 @@ export function formatColo(colo) {
   return COLO_LABELS[code] ? `${COLO_LABELS[code]} ${code}` : `🌐 ${code}`;
 }
 
+function shouldKeepName(name) {
+  return name && !String(name).startsWith("CF Edge ");
+}
+
 export function formatEdgeNodeName(node, index) {
-  if (node.name) return node.name;
+  if (shouldKeepName(node.name)) return node.name;
   const location = formatColo(node.colo) || "🌐 未识别地区";
   const latency = Number.isFinite(Number(node.latency)) ? ` ${node.latency}ms` : "";
   return `${location}${latency} #${index + 1}`;

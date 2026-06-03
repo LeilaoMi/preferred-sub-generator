@@ -11,4 +11,5 @@ test("format COLO as Chinese location with flag", () => {
 test("format edge node name uses Chinese COLO label", () => {
   assert.equal(formatEdgeNodeName({ colo: "SJC", latency: 34 }, 1), "🇺🇸 美国圣何塞 SJC 34ms #2");
   assert.equal(formatEdgeNodeName({ name: "已有名称", colo: "SJC", latency: 34 }, 1), "已有名称");
+  assert.equal(formatEdgeNodeName({ name: "CF Edge SJC 34ms #2", colo: "SJC", latency: 34 }, 1), "🇺🇸 美国圣何塞 SJC 34ms #2");
 });
