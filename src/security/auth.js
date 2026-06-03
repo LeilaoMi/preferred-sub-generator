@@ -1,4 +1,11 @@
-import { timingSafeEqual } from "node:crypto";
+function constantTimeEqual(a, b) {
+  if (a.length !== b.length) return false;
+  let result = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return result === 0;
+}
 
 function getClientIp(request) {
   return request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for") || "unknown";
@@ -42,10 +49,6 @@ export function requireAuth(request, env) {
     return { authorized: false, reason: "Unauthorized" };
   }
 
-  const a = Buffer.from(candidate);
-  const ok = tokens.some((token) => {
-    const b = Buffer.from(token);
-    return a.length === b.length && timingSafeEqual(a, b);
-  });
+  const ok = tokens.some((token) => constantTimeEqual(candidate, token));
   return ok ? { authorized: true } : { authorized: false, reason: "Unauthorized" };
 }
