@@ -9,7 +9,9 @@ const template = "vless://11111111-1111-4111-8111-111111111111@example.com:443?e
 const bestIps = Array.from({ length: 60 }, (_, index) => ({
   address: `1.1.1.${index + 1}`,
   port: index % 2 === 0 ? 443 : 8443,
-  name: `优选-${index + 1}`,
+  name: index < 2 ? undefined : `优选-${index + 1}`,
+  colo: index === 0 ? "LAX" : index === 1 ? "SJC" : "",
+  latency: index === 0 ? 12 : index === 1 ? 34 : null,
 }));
 const status = {
   updatedAt: "2026-06-03T00:00:00.000Z",
@@ -53,6 +55,8 @@ test("sub generates Clash subscription with token", async () => {
   assert.equal(response.headers.get("Content-Type"), "text/yaml; charset=utf-8");
   assert.match(text, /server: "1.1.1.1"/);
   assert.match(text, /server: "1.1.1.2"/);
+  assert.match(text, /CF Edge LAX-12ms-#1/);
+  assert.match(text, /CF Edge SJC-34ms-#2/);
   assert.doesNotMatch(text, /1\.1\.1\.3/);
 });
 
@@ -68,6 +72,7 @@ test("sub supports bearer token and Sing-box output", async () => {
   assert.equal(response.status, 200);
   assert.equal(parsed.outbounds.length, 1);
   assert.equal(parsed.outbounds[0].server, "1.1.1.1");
+  assert.equal(parsed.outbounds[0].tag, "CF Edge LAX-12ms-#1");
 });
 
 test("sub generates base64 v2rayNG subscription", async () => {
@@ -80,6 +85,7 @@ test("sub generates base64 v2rayNG subscription", async () => {
   assert.match(decoded, /@1\.1\.1\.1:443/);
   assert.match(decoded, /type=ws/);
   assert.match(decoded, /security=tls/);
+  assert.match(decoded, /#CF%20Edge%20LAX-12ms-%231/);
 });
 
 test("template API: missing token returns 401", async () => {

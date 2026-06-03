@@ -14,8 +14,19 @@ function getLimit(url, total) {
   return Math.min(requested, MAX_NODES, total);
 }
 
+function nodeName(node, index) {
+  if (node.name) return node.name;
+  const colo = node.colo ? `${node.colo}-` : "";
+  const latency = Number.isFinite(Number(node.latency)) ? `${node.latency}ms-` : "";
+  return `CF Edge ${colo}${latency}#${index + 1}`;
+}
+
+function normalizeNodes(nodes) {
+  return nodes.map((node, index) => ({ ...node, name: nodeName(node, index) }));
+}
+
 function generateVlessSubscription(template, nodes) {
-  return nodes.map((node, index) => generateVlessUri(template, { name: `优选-${index + 1}`, ...node })).join("\n");
+  return normalizeNodes(nodes).map((node) => generateVlessUri(template, node)).join("\n");
 }
 
 function base64Encode(text) {
@@ -46,15 +57,15 @@ export async function handleSub(request, env) {
   }
 
   if (type === "shadowrocket") {
-    return textResponse(generateShadowrocketSubscription(template, nodes));
+    return textResponse(generateShadowrocketSubscription(template, normalizeNodes(nodes)));
   }
 
   if (type === "clash" || type === "mihomo") {
-    return textResponse(generateClashSubscription(template, nodes), "text/yaml; charset=utf-8");
+    return textResponse(generateClashSubscription(template, normalizeNodes(nodes)), "text/yaml; charset=utf-8");
   }
 
   if (type === "singbox" || type === "sing-box") {
-    return textResponse(generateSingboxSubscription(template, nodes));
+    return textResponse(generateSingboxSubscription(template, normalizeNodes(nodes)));
   }
 
   return jsonResponse({ error: "Unsupported subscription type" }, 400);
