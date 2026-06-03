@@ -123,7 +123,8 @@ test("template API: GET returns parsed preview and safe template (no raw)", asyn
   assert.equal(parsed.template, undefined);
   assert.equal(typeof parsed.templateSafe, "object");
   assert.equal(typeof parsed.templateSafe.uuidMasked, "string");
-  assert.equal(parsed.preview.uuid, "11111111-1111-4111-8111-111111111111");
+  assert.equal(parsed.preview.uuid, undefined);
+  assert.equal(parsed.preview.uuidMasked, "11111111…");
   assert.equal(parsed.preview.host, "example.com");
 });
 

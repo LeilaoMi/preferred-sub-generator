@@ -71,7 +71,8 @@ export async function handleTemplateGet(request, env) {
 
   const key = templateKeyFromRequest(request);
   const raw = await readRawTemplate(env.SUB_KV, key);
-  return jsonResponse({ key, templateSafe: toTemplateSafe(raw), preview: toTemplatePreview(raw) });
+  const templateSafe = toTemplateSafe(raw);
+  return jsonResponse({ key, templateSafe, preview: templateSafe });
 }
 
 export async function handleTemplatePost(request, env) {
