@@ -1,0 +1,10 @@
+{
+  "name": "preferred-sub-generator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "preflight": "node scripts/preflight.js"
+  }
+}

@@ -1,0 +1,7 @@
+name = "preferred-sub-generator"
+pages_build_output_dir = "public"
+compatibility_date = "2026-06-03"
+
+[[kv_namespaces]]
+binding = "SUB_KV"
+id = "9c1be2549489489ca8c55c5886b56b3d"

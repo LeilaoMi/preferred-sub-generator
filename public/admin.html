@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>订阅配置 - 优选订阅生成器</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f172a;
+      --card: rgba(15, 23, 42, 0.82);
+      --border: rgba(148, 163, 184, 0.22);
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --good: #34d399;
+      --bad: #fb7185;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top, #1e3a8a 0, var(--bg) 42%, #020617 100%);
+      color: var(--text);
+      padding: 24px;
+    }
+    main { max-width: 960px; margin: 0 auto; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      padding: 24px;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.32);
+      backdrop-filter: blur(12px);
+    }
+    h1 { margin: 0 0 8px; font-size: clamp(28px, 5vw, 44px); }
+    p { color: var(--muted); line-height: 1.7; }
+    label { display: block; margin: 18px 0 8px; font-weight: 700; }
+    input, textarea {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: rgba(2, 6, 23, 0.68);
+      color: var(--text);
+      padding: 14px;
+      font: inherit;
+    }
+    textarea { min-height: 150px; resize: vertical; }
+    button {
+      border: 0;
+      border-radius: 999px;
+      background: linear-gradient(135deg, #38bdf8, #818cf8);
+      color: #020617;
+      font-weight: 800;
+      padding: 12px 18px;
+      margin: 14px 10px 0 0;
+      cursor: pointer;
+    }
+    button.secondary { background: rgba(148, 163, 184, 0.18); color: var(--text); border: 1px solid var(--border); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-top: 18px; }
+    .item { border: 1px solid var(--border); border-radius: 14px; padding: 14px; background: rgba(2, 6, 23, 0.35); }
+    .key { color: var(--muted); font-size: 12px; }
+    .value { margin-top: 6px; word-break: break-all; }
+    .status { margin-top: 16px; padding: 12px 14px; border-radius: 14px; background: rgba(56, 189, 248, 0.12); color: var(--accent); }
+    .status.bad { background: rgba(251, 113, 133, 0.12); color: var(--bad); }
+    .status.good { background: rgba(52, 211, 153, 0.12); color: var(--good); }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="card">
+      <h1>订阅配置</h1>
+      <p>这里用于更换你的原始 VLESS 模板。保存后，现有优选 IP 会继续复用新的 UUID、Host、SNI、路径和 TLS 设置。</p>
+
+      <label for="token">访问 token</label>
+      <input id="token" type="password" placeholder="粘贴你的订阅 token" autocomplete="off" />
+
+      <label for="template">原始 VLESS 链接</label>
+      <textarea id="template" placeholder="vless://..."></textarea>
+
+      <button id="load">读取当前模板</button>
+      <button id="preview" class="secondary">解析预览</button>
+      <button id="save">保存模板</button>
+
+      <div id="message" class="status">请先填写 token，或用 /admin.html?token=你的token 打开。</div>
+      <div id="previewBox" class="grid"></div>
+    </section>
+  </main>
+
+  <script>
+    const tokenInput = document.getElementById("token");
+    const templateInput = document.getElementById("template");
+    const message = document.getElementById("message");
+    const previewBox = document.getElementById("previewBox");
+    tokenInput.value = new URL(location.href).searchParams.get("token") || "";
+
+    function setMessage(text, type = "") {
+      message.textContent = text;
+      message.className = `status ${type}`;
+    }
+
+    function renderPreview(preview) {
+      const fields = ["uuid", "address", "port", "security", "type", "host", "sni", "path", "name"];
+      previewBox.innerHTML = fields.map((key) => `
+        <div class="item">
+          <div class="key">${key}</div>
+          <div class="value">${preview[key] || "-"}</div>
+        </div>
+      `).join("");
+    }
+
+    async function requestTemplate(method, body) {
+      const token = tokenInput.value.trim();
+      if (!token) throw new Error("请先填写 token");
+      const response = await fetch(`/api/template?token=${encodeURIComponent(token)}`, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "请求失败");
+      return data;
+    }
+
+    document.getElementById("load").onclick = async () => {
+      try {
+        const data = await requestTemplate("GET");
+        templateInput.value = data.template;
+        renderPreview(data.preview);
+        setMessage("已读取当前模板。", "good");
+      } catch (error) {
+        setMessage(error.message, "bad");
+      }
+    };
+
+    document.getElementById("preview").onclick = () => {
+      try {
+        const url = new URL(templateInput.value.trim());
+        if (url.protocol !== "vless:") throw new Error("必须是 vless:// 链接");
+        const params = Object.fromEntries(url.searchParams.entries());
+        renderPreview({
+          uuid: decodeURIComponent(url.username),
+          address: url.hostname,
+          port: url.port || "-",
+          security: params.security || "none",
+          type: params.type || "tcp",
+          host: params.host || "-",
+          sni: params.sni || params.peer || "-",
+          path: params.path ? decodeURIComponent(params.path) : "-",
+          name: url.hash ? decodeURIComponent(url.hash.slice(1)) : "-",
+        });
+        setMessage("解析成功，确认无误后可保存。", "good");
+      } catch (error) {
+        setMessage(error.message, "bad");
+      }
+    };
+
+    document.getElementById("save").onclick = async () => {
+      try {
+        const data = await requestTemplate("POST", { template: templateInput.value.trim() });
+        renderPreview(data.preview);
+        setMessage("保存成功。订阅接口会立即使用新模板。", "good");
+      } catch (error) {
+        setMessage(error.message, "bad");
+      }
+    };
+  </script>
+</body>
+</html>

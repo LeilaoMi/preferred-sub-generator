@@ -1,0 +1,3 @@
+# CF Edge 手动候选源。
+# 这里只放 Cloudflare 官方边缘 IP 或你自己确认属于 CF Edge 的 IP。
+# 这里只放 Cloudflare 边缘 IP，不放其它中转地址。
