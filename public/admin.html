@@ -1,6 +1,7 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
+  <meta name="robots" content="noindex, nofollow">
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>订阅配置 - 优选订阅生成器</title>
@@ -73,6 +74,9 @@
       <h1>订阅配置</h1>
       <p>这里用于更换你的原始 VLESS 模板。保存后，现有优选 IP 会继续复用新的 UUID、Host、SNI、路径和 TLS 设置。</p>
 
+      <label for="token">管理 token</label>
+      <input id="token" type="password" placeholder="粘贴你的管理 token" autocomplete="off" />
+
       <label for="template">原始 VLESS 链接</label>
       <textarea id="template" placeholder="vless://..."></textarea>
 
@@ -80,15 +84,17 @@
       <button id="preview" class="secondary">解析预览</button>
       <button id="save">保存模板</button>
 
-      <div id="message" class="status">可读取或保存当前 VLESS 模板。</div>
+      <div id="message" class="status">请先填写管理 token，或用 /admin.html#token=你的token 打开。</div>
       <div id="previewBox" class="grid"></div>
     </section>
   </main>
 
   <script>
+    const tokenInput = document.getElementById("token");
     const templateInput = document.getElementById("template");
     const message = document.getElementById("message");
     const previewBox = document.getElementById("previewBox");
+    tokenInput.value = new URL(location.href).searchParams.get("token") || location.hash.replace(/^#token=/, "").trim();
 
     function setMessage(text, type = "") {
       message.textContent = text;
@@ -106,9 +112,15 @@
     }
 
     async function requestTemplate(method, body) {
+      const token = tokenInput.value.trim();
+      if (!token) throw new Error("请先填写管理 token");
+
       const response = await fetch("/api/template", {
         method,
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
         body: body ? JSON.stringify(body) : undefined,
       });
       const data = await response.json();
@@ -119,9 +131,8 @@
     document.getElementById("load").onclick = async () => {
       try {
         const data = await requestTemplate("GET");
-        templateInput.value = data.template;
         renderPreview(data.preview);
-        setMessage("已读取当前模板。", "good");
+        setMessage("已读取当前模板安全预览。为避免泄露，系统不会回显完整原始 VLESS。", "good");
       } catch (error) {
         setMessage(error.message, "bad");
       }

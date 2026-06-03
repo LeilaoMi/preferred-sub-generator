@@ -25,13 +25,13 @@ id = "abc123"
 });
 
 test("preflight checks workflow secrets names", () => {
-  const workflow = "CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_NAMESPACE_ID";
+  const workflow = "CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_NAMESPACE_ID npm run preflight";
 
   assert.deepEqual(checkWorkflow(workflow), []);
 });
 
 test("preflight checks homepage safety", () => {
-  const html = '<html lang="zh-CN"><script>fetch("/status")</script></html>';
+  const html = '<html lang="zh-CN"><script>fetch("/status"); fetch("/api/template", { headers: { Authorization: `Bearer token` } });</script></html>';
 
   assert.deepEqual(checkHomepage(html), []);
 });

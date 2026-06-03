@@ -34,10 +34,12 @@
   - Shadowrocket VLESS 链接列表
 - 提供 Cloudflare Pages Functions API：
   - `/status`
+  - `/health`
   - `/sub`
   - `/best`
   - `/api/template`
-- `/sub`、`/best`、`/api/template` 默认无需 token，方便网页输入后直接复制到客户端。
+- `/sub`、`/best` 默认无需 token，方便复制到客户端。
+- `/api/template` 需要管理 token，仅用于保存或读取原始 VLESS 模板，token 不会拼进订阅链接。
 - GitHub Actions 可每 6 小时自动刷新 Cloudflare KV 中的优选 IP。
 - 不引入 ProxyIP、SOCKS5、NAT64、中转 IP 或公益节点混合源。
 
@@ -100,6 +102,7 @@ public/admin.html                私用模板配置页
 functions/sub.js                 订阅接口
 functions/best.js                优选 IP 列表接口
 functions/status.js              公开状态接口
+functions/health.js              健康检查接口
 functions/api/template.js        模板读取/保存接口
 src/parser/vless.js              VLESS 解析
 src/generator/vless.js           VLESS 生成
@@ -127,6 +130,8 @@ sources/edge/remote.json         远程 CF Edge 候选源
 TEMPLATE   原始 VLESS 模板，由网页保存
 BEST_IPS   优选 IP 检测结果
 STATUS     更新时间、可用数量、检测状态
+TEMPLATE_AUDIT   最近一次模板保存审计信息
+LAST_RUN_*       最近一次 GitHub Actions 自动刷新结果
 ```
 
 创建后记录 Namespace ID，并填入：
@@ -154,9 +159,18 @@ KV 绑定变量名：SUB_KV
 Cloudflare Pages 生产环境需要设置：
 
 ```text
+SUB_TOKEN   管理 token，用于保存/读取原始 VLESS 模板
 ```
 
-订阅接口默认无需 token。请不要把部署域名公开给不信任的人。
+可选环境变量：
+
+```text
+SUB_TOKEN_NEXT     轮换 token 时临时添加的新 token
+SUB_ALLOWED_IPS    管理接口 IP 白名单，多个 IP 用英文逗号分隔
+UPDATE_WEBHOOK_URL GitHub Actions 更新完成后的通知 Webhook
+```
+
+订阅接口 `/sub` 和 `/best` 无需 token，方便客户端导入。管理接口 `/api/template` 需要 `SUB_TOKEN`；不要把 token 拼进订阅 URL。
 
 ## 部署到 Cloudflare Pages
 
@@ -201,6 +215,7 @@ Namespace：你创建的 KV
 7. 添加生产环境变量：
 
 ```text
+SUB_TOKEN   管理 token，用于保存/读取原始 VLESS 模板
 ```
 
 8. 部署。
@@ -299,36 +314,42 @@ GET /sub?type=v2rayng
 GET /sub?type=clash
 GET /sub?type=singbox
 GET /sub?type=shadowrocket
+GET /sub?type=v2rayng&template=1
 ```
 
 可选参数：
 
 ```text
-n=20   限制返回节点数量，最多 50
+n=20        限制返回节点数量，最多 50
+template=1  使用 TEMPLATE_1 模板槽位，支持 1-5
 ```
 
 ### 优选列表
 
 ```text
 GET /best?n=20
+GET /best?n=20&version=last
 ```
 
-返回当前 KV 中的优选节点 JSON。
+返回当前 KV 中的优选节点 JSON。`version=last` 返回最近一次版本化快照。
 
 ### 模板配置
 
 ```text
 GET  /api/template
 POST /api/template
+GET  /api/template?slot=1
+POST /api/template?slot=1
 ```
 
-POST body：
+`/api/template` 需要管理 token，支持：
 
-```json
-{
-  "template": "vless://..."
-}
+```text
+Authorization: Bearer 你的SUB_TOKEN
+/api/template?token=你的SUB_TOKEN
 ```
+
+GET 只返回安全预览，不返回完整原始 VLESS。`slot=1` 到 `slot=5` 可保存多个模板槽位。
 
 ## 候选源配置
 
@@ -419,7 +440,7 @@ curl "https://你的域名/sub?type=v2rayng"
 curl "https://你的域名/best?n=20"
 ```
 
-订阅接口默认无需 token。便利性优先，但请不要公开部署域名。
+订阅接口 `/sub` 和 `/best` 默认无需 token。便利性优先，但请不要公开部署域名。管理接口 `/api/template` 需要 `SUB_TOKEN`，token 只用于保存/读取模板，不会放进订阅链接。
 
 如果 `/sub` 返回没有可用节点，先确认 GitHub Actions 是否已经成功刷新 `BEST_IPS`，或者手动触发一次 Actions。
 

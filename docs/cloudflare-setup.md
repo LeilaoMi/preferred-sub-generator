@@ -46,16 +46,18 @@ CLOUDFLARE_NAMESPACE_ID   # KV Namespace ID
 
 原始 VLESS 节点通过网页输入并保存到 Cloudflare KV 的 `TEMPLATE`，不要写进 GitHub Secrets 或仓库文件。
 
-## 4. Cloudflare API Token 最小权限
+## 4. 设置环境变量
 
-建议创建自定义 API Token，只给必要权限：
+在 Pages 生产环境变量中添加：
 
 ```text
-Account → Workers KV Storage → Edit
-Account → Account Settings → Read
+SUB_TOKEN          管理 token，用于保存/读取原始 VLESS 模板
+SUB_TOKEN_NEXT     可选，token 轮换期间使用的新 token
+SUB_ALLOWED_IPS    可选，管理接口 IP 白名单，多个 IP 用英文逗号分隔
+UPDATE_WEBHOOK_URL 可选，自动刷新完成后的通知 Webhook
 ```
 
-资源范围只选择当前账号。不要使用全局 API Key。
+订阅接口 `/sub` 和 `/best` 无需 token，方便客户端导入。管理接口 `/api/template` 需要 `SUB_TOKEN`；不要把 token 拼进订阅 URL。
 
 ## 5. 部署前验证
 

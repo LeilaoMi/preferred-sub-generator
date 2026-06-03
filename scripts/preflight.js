@@ -6,6 +6,7 @@ const REQUIRED_FILES = [
   "functions/sub.js",
   "functions/best.js",
   "functions/status.js",
+  "functions/health.js",
   "functions/api/template.js",
   "scripts/update-kv.js",
   "sources/edge/manual.txt",
@@ -35,6 +36,7 @@ export function checkWorkflow(content) {
   for (const name of ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_NAMESPACE_ID"]) {
     if (!content.includes(name)) issues.push(`GitHub Actions 缺少 ${name}`);
   }
+  if (!content.includes("npm run preflight")) issues.push("GitHub Actions 未运行 npm run preflight");
   return issues;
 }
 
@@ -42,6 +44,7 @@ export function checkHomepage(content) {
   const issues = [];
   if (!content.includes('lang="zh-CN"')) issues.push("首页未设置 lang=zh-CN");
   if (!content.includes("/status")) issues.push("首页未读取 /status");
+  if (!content.includes("Authorization")) issues.push("首页保存模板时未发送管理 token");
   if (content.includes("secret-token")) issues.push("首页包含测试 token");
   return issues;
 }

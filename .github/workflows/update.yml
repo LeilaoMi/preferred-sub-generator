@@ -20,6 +20,12 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Run preflight checks
+        run: npm run preflight
+
+      - name: Validate manual sources
+        run: npm run validate:sources
+
       - name: Update Cloudflare KV
         run: node scripts/update-kv.js
         env:

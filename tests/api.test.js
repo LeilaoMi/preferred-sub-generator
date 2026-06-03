@@ -19,8 +19,11 @@ const bestIps = Array.from({ length: 60 }, (_, index) => ({
 const status = {
   updatedAt: "2026-06-03T00:00:00.000Z",
   available: bestIps.length,
+  newAvailable: 12,
   sourceCount: 3,
-  lastError: "raw private error",
+  checked: 88,
+  protectedByPrevious: true,
+  lastError: "本次可用节点少于 20，已保留上次可用结果",
 };
 
 function createEnv() {
@@ -31,6 +34,7 @@ function createEnv() {
   ]);
 
   return {
+    SUB_TOKEN: "secret-token",
     SUB_KV: {
       async get(key) {
         return data.get(key) || null;
@@ -101,12 +105,24 @@ test("sub generates Sing-box subscription with localized generated names", async
   assert.equal(parsed.outbounds[0].tag, expectedGeneratedName);
 });
 
-test("template API: GET returns parsed preview", async () => {
-  const response = await handleTemplateGet(new Request("https://example.com/template"), createEnv());
+test("template API: missing token returns 401", async () => {
+  const response = await handleTemplateGet(new Request("https://example.com/template"), {
+    ...createEnv(),
+    SUB_TOKEN: "required-token",
+  });
+
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { error: "Unauthorized" });
+});
+
+test("template API: GET returns parsed preview and safe template (no raw)", async () => {
+  const response = await handleTemplateGet(new Request("https://example.com/template?token=secret-token"), createEnv());
   const parsed = await response.json();
 
   assert.equal(response.status, 200);
-  assert.equal(parsed.template.startsWith("vless://"), true);
+  assert.equal(parsed.template, undefined);
+  assert.equal(typeof parsed.templateSafe, "object");
+  assert.equal(typeof parsed.templateSafe.uuidMasked, "string");
   assert.equal(parsed.preview.uuid, "11111111-1111-4111-8111-111111111111");
   assert.equal(parsed.preview.host, "example.com");
 });
@@ -114,7 +130,7 @@ test("template API: GET returns parsed preview", async () => {
 test("template API: POST saves new vless and returns parsed", async () => {
   const env = createEnv();
   const response = await handleTemplatePost(
-    new Request("https://example.com/template", {
+    new Request("https://example.com/template?token=secret-token", {
       method: "POST",
       body: JSON.stringify({
         template: "vless://22222222-2222-4222-8222-222222222222$new.example:443?encryption=none&security=tls&sni=new.example&type=ws&host=new.example&path=%2Fnew#新节点".replace("$", "@"),
@@ -141,14 +157,17 @@ test("best limits nodes to 50", async () => {
   assert.equal(parsed.total, 60);
 });
 
-test("status is public and hides raw errors", async () => {
+test("status is public and exposes semantic fallback state", async () => {
   const response = await handleStatus(new Request("https://example.com/status"), createEnv());
   const parsed = await response.json();
 
   assert.equal(response.status, 200);
   assert.equal(parsed.updatedAt, "2026-06-03T00:00:00.000Z");
   assert.equal(parsed.available, 60);
+  assert.equal(parsed.newAvailable, 12);
   assert.equal(parsed.sourceCount, 3);
-  assert.equal(parsed.lastError, "检测失败，已保留上次可用结果");
-  assert.notEqual(parsed.lastError, "raw private error");
+  assert.equal(parsed.checked, 88);
+  assert.equal(parsed.fallbackActive, true);
+  assert.equal(parsed.status, "fallback");
+  assert.equal(parsed.lastError, "本次可用节点少于 20，已保留上次可用结果");
 });

@@ -108,6 +108,12 @@ test("build update payload keeps top 50 checked nodes with colo names", async ()
   assert.equal(status.updatedAt, "2026-06-03T00:00:00.000Z");
   assert.equal(status.available, 50);
   assert.equal(status.protectedByPrevious, false);
+  assert.equal(payload.LAST_RUN_AT, "2026-06-03T00:00:00.000Z");
+  assert.equal(payload.LAST_RUN_OK, "true");
+  assert.equal(payload.LAST_RUN_AVAILABLE, "50");
+  assert.equal(JSON.parse(payload.BEST_IPS_LAST).length, 50);
+  assert.equal(JSON.parse(payload.BEST_IPS_TREND).length, 1);
+  assert.equal(status.available, 50);
 });
 
 test("build update payload keeps previous nodes when new result is too small", async () => {

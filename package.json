@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
-    "preflight": "node scripts/preflight.js"
+    "preflight": "node scripts/preflight.js",
+    "validate:sources": "node scripts/validate-sources.js"
   }
 }

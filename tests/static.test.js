@@ -2,30 +2,36 @@ import fs from "node:fs/promises";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-test("homepage is Chinese, builds tokenless subscription URLs", async () => {
+test("homepage is Chinese, builds tokenless subscription URLs, and uses admin token only for template save", async () => {
   const html = await fs.readFile(new URL("../public/index.html", import.meta.url), "utf8");
 
   assert.match(html, /<html lang="zh-CN">/);
   assert.match(html, /优选订阅生成器/);
   assert.match(html, /节点链接/);
-  assert.match(html, /生成优选订阅/);
+  assert.match(html, /管理 token/);
   assert.match(html, /默认格式/);
   assert.match(html, /\/status/);
   assert.match(html, /\/sub\?type=v2rayng/);
   assert.match(html, /location\.origin/);
   assert.match(html, /api\/template/);
+  assert.match(html, /Authorization/);
   assert.match(html, /已保存节点模板/);
-  assert.equal((html.match(/id="token"/g) || []).length, 0);
+  assert.equal((html.match(/id="adminToken"/g) || []).length, 1);
   assert.equal((html.match(/id="subscriptionList"/g) || []).length, 1);
+  assert.doesNotMatch(html, /\/sub\?type=v2rayng&token=/);
   assert.match(html, /复制/);
   assert.doesNotMatch(html, /secret-token/);
+  assert.match(html, /保存并生成/);
+  assert.match(html, /仅显示订阅/);
 });
 
-test("admin page is Chinese and contains tokenless api/template, preview, and save template", async () => {
+test("admin page is Chinese and uses admin token for api/template", async () => {
   const html = await fs.readFile(new URL("../public/admin.html", import.meta.url), "utf8");
 
   assert.match(html, /订阅配置/);
+  assert.match(html, /管理 token/);
   assert.match(html, /api\/template/);
+  assert.match(html, /Authorization/);
   assert.match(html, /解析预览/);
   assert.match(html, /保存模板/);
   assert.doesNotMatch(html, /secret-token/);
@@ -44,6 +50,6 @@ test("deploy checklist contains required secrets and safety checks", async () =>
   const checklist = await fs.readFile(new URL("../docs/deploy-checklist.md", import.meta.url), "utf8");
 
   assert.match(checklist, /CLOUDFLARE_API_TOKEN/);
-  assert.match(checklist, /网页输入/);
-  assert.match(checklist, /无需 token/);
+  assert.match(checklist, /SUB_TOKEN/);
+  assert.match(checklist, /订阅链接无需 token/);
 });

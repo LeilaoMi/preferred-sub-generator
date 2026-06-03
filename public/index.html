@@ -107,6 +107,12 @@
       margin-top: 16px;
       align-items: center;
     }
+    .button-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
     button {
       border: 0;
       border-radius: 16px;
@@ -179,6 +185,10 @@
 
         <div class="form-grid">
           <div>
+            <label for="adminToken">管理 token</label>
+            <input id="adminToken" type="password" placeholder="仅用于保存模板，不会放进订阅链接" autocomplete="off">
+          </div>
+          <div>
             <label for="format">默认格式</label>
             <select id="format">
               <option value="v2rayng">v2rayNG</option>
@@ -191,8 +201,11 @@
         </div>
 
         <div class="actions">
-          <p class="hint">提示：点击生成会把当前 VLESS 节点保存为模板；请勿把页面地址公开给不信任的人。</p>
-          <button id="generate" type="button">生成优选订阅</button>
+          <p class="hint">提示：点击“保存并生成”会把当前 VLESS 节点保存为模板；“仅显示订阅”不会修改模板。订阅链接本身永远不带 token。</p>
+          <div class="button-row">
+            <button id="showOnly" class="secondary" type="button">仅显示订阅</button>
+            <button id="generate" type="button">保存并生成</button>
+          </div>
         </div>
 
         <div id="result" class="result" aria-live="polite">
@@ -233,11 +246,15 @@
       ["Shadowrocket", "/sub?type=shadowrocket"],
       ["优选列表", "/best?n=20"],
     ];
+    const adminTokenInput = document.getElementById("adminToken");
     const nodeLinkInput = document.getElementById("nodeLink");
     const formatSelect = document.getElementById("format");
     const subscriptionList = document.getElementById("subscriptionList");
     const result = document.getElementById("result");
     const resultHint = document.getElementById("resultHint");
+
+    const tokenFromUrl = new URL(location.href).searchParams.get("token") || location.hash.replace(/^#token=/, "").trim();
+    if (tokenFromUrl) adminTokenInput.value = tokenFromUrl;
 
     const formatTime = (value) => {
       if (!value) return "暂无数据";
@@ -265,6 +282,18 @@
       }).join("");
     }
 
+    function renderTemplatePreview(preview) {
+      if (!preview) return "";
+      const rows = [
+        ["UUID", preview.uuid],
+        ["Host", preview.host],
+        ["SNI", preview.sni],
+        ["TLS", preview.security],
+        ["节点名", preview.name],
+      ];
+      return `<ul>${rows.map(([label, value]) => `<li><strong>${label}：</strong>${value || "-"}</li>`).join("")}</ul>`;
+    }
+
     async function copyText(text) {
       if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(text);
@@ -278,27 +307,40 @@
       textarea.remove();
     }
 
-    async function saveTemplate(nodeLink) {
+    async function saveTemplate(nodeLink, token) {
       const response = await fetch("/api/template", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Authorization": `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({ template: nodeLink }),
       });
+      const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
         throw new Error(data.error || "模板保存失败");
       }
+      return data;
     }
+
+    document.getElementById("showOnly").addEventListener("click", () => {
+      result.classList.add("visible");
+      resultHint.textContent = "已显示无 token 订阅链接，未修改当前保存的 VLESS 模板。";
+      renderSubscriptions();
+    });
 
     document.getElementById("generate").addEventListener("click", async () => {
       const nodeLink = nodeLinkInput.value.trim();
+      const token = adminTokenInput.value.trim();
       result.classList.add("visible");
       if (!nodeLink.startsWith("vless://")) {
         resultHint.innerHTML = "<span class='danger'>请先粘贴 vless:// 节点链接。</span>";
+      } else if (!token) {
+        resultHint.innerHTML = "<span class='warn'>请先填写管理 token，用来保存原始 VLESS 模板。</span> 下面订阅链接本身不会带 token。";
       } else {
         try {
-          await saveTemplate(nodeLink);
-          resultHint.textContent = "已保存节点模板，并生成订阅链接，可直接复制到客户端。";
+          const data = await saveTemplate(nodeLink, token);
+          resultHint.innerHTML = `已保存节点模板，并生成无 token 订阅链接，可直接复制到客户端。${renderTemplatePreview(data.preview)}`;
         } catch (error) {
           resultHint.innerHTML = `<span class='danger'>${error.message}</span>`;
         }
