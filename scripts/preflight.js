@@ -32,7 +32,7 @@ export function checkWranglerToml(content) {
 
 export function checkWorkflow(content) {
   const issues = [];
-  for (const name of ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_NAMESPACE_ID", "ORIGINAL_SUB_OR_NODE"]) {
+  for (const name of ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_NAMESPACE_ID"]) {
     if (!content.includes(name)) issues.push(`GitHub Actions 缺少 ${name}`);
   }
   return issues;

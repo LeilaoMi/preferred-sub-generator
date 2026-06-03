@@ -43,16 +43,9 @@ SUB_TOKEN    # 私有订阅 token，不要公开
 CLOUDFLARE_API_TOKEN      # 用于写 KV
 CLOUDFLARE_ACCOUNT_ID     # Cloudflare Account ID
 CLOUDFLARE_NAMESPACE_ID   # KV Namespace ID
-ORIGINAL_SUB_OR_NODE      # 你的原始 VLESS 节点或订阅模板
 ```
 
-`ORIGINAL_SUB_OR_NODE` 必须是你自己的原始 VLESS 节点，例如：
-
-```text
-vless://uuid@example.com:443?encryption=none&security=tls&sni=example.com&type=ws&host=example.com&path=%2Fws#原始节点
-```
-
-不要把真实节点写进仓库文件。
+原始 VLESS 节点通过网页输入并保存到 Cloudflare KV 的 `TEMPLATE`，不要写进 GitHub Secrets 或仓库文件。
 
 ## 4. Cloudflare API Token 最小权限
 

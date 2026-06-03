@@ -72,7 +72,6 @@ functions/status.js           # 状态接口
 CLOUDFLARE_API_TOKEN      # GitHub Actions 更新 KV 用；当前约定使用目标账号 token
 CLOUDFLARE_ACCOUNT_ID     # 目标 Cloudflare 账号 ID
 CLOUDFLARE_NAMESPACE_ID   # 目标账号 SUB_KV Namespace ID
-ORIGINAL_SUB_OR_NODE      # 原始 VLESS 链接
 ```
 
 ## 部署前检查

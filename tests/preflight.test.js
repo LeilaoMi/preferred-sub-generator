@@ -25,7 +25,7 @@ id = "abc123"
 });
 
 test("preflight checks workflow secrets names", () => {
-  const workflow = "CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_NAMESPACE_ID ORIGINAL_SUB_OR_NODE";
+  const workflow = "CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_NAMESPACE_ID";
 
   assert.deepEqual(checkWorkflow(workflow), []);
 });

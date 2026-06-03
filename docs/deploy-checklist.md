@@ -14,7 +14,6 @@
 - [ ] `CLOUDFLARE_API_TOKEN`
 - [ ] `CLOUDFLARE_ACCOUNT_ID`
 - [ ] `CLOUDFLARE_NAMESPACE_ID`
-- [ ] `ORIGINAL_SUB_OR_NODE`
 
 ## 数据源
 
@@ -23,6 +22,7 @@
 
 ## 验证
 
+- [ ] 已先在网页输入并保存真实 VLESS 模板。
 - [ ] 本地测试通过：`npm test`。
 - [ ] GitHub Actions 手动触发成功。
 - [ ] `/status` 能返回更新时间和可用节点数量。

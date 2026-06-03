@@ -30,7 +30,8 @@ function edgeName(item, index) {
 }
 
 export async function buildUpdatePayload({ originalNode, manualText, remoteSources, checkOne, previousBestIps = null, now = new Date() }) {
-  const template = parseVlessUri(originalNode.trim());
+  const templateValue = originalNode.trim();
+  const template = parseVlessUri(templateValue);
   const candidates = await collectCandidates({ manualText, remoteSources });
   const checked = await checkCandidates(candidates, getPortsForSecurity(template.security), {
     checkOne,
@@ -52,7 +53,7 @@ export async function buildUpdatePayload({ originalNode, manualText, remoteSourc
   const bestIps = protectedByPrevious ? previousBestIps : nextBestIps;
 
   return {
-    TEMPLATE: originalNode.trim(),
+    TEMPLATE: templateValue,
     BEST_IPS: JSON.stringify(bestIps, null, 2),
     STATUS: JSON.stringify(
       {
@@ -70,6 +71,17 @@ export async function buildUpdatePayload({ originalNode, manualText, remoteSourc
       2,
     ),
   };
+}
+
+async function readCurrentTemplate() {
+  const value = await readKvValue({
+    accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+    namespaceId: process.env.CLOUDFLARE_NAMESPACE_ID,
+    apiToken: process.env.CLOUDFLARE_API_TOKEN,
+    key: "TEMPLATE",
+  });
+  if (!value) throw new Error("Missing TEMPLATE. Please save a VLESS template from the web page first.");
+  return value.trim();
 }
 
 async function readPreviousBestIps() {
@@ -90,7 +102,7 @@ async function readPreviousBestIps() {
 }
 
 export async function main() {
-  const required = ["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_NAMESPACE_ID", "CLOUDFLARE_API_TOKEN", "ORIGINAL_SUB_OR_NODE"];
+  const required = ["CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_NAMESPACE_ID", "CLOUDFLARE_API_TOKEN"];
   for (const name of required) {
     if (!process.env[name]) throw new Error(`Missing required env: ${name}`);
   }
@@ -98,8 +110,9 @@ export async function main() {
   const remoteSources = await readJsonFile("sources/edge/remote.json", []);
   const manualText = await readTextFile("sources/edge/manual.txt");
   const previousBestIps = await readPreviousBestIps();
+  const originalNode = process.env.ORIGINAL_SUB_OR_NODE || await readCurrentTemplate();
   const payload = await buildUpdatePayload({
-    originalNode: process.env.ORIGINAL_SUB_OR_NODE,
+    originalNode,
     manualText,
     remoteSources,
     previousBestIps,

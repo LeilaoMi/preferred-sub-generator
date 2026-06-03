@@ -45,7 +45,7 @@ test("deploy checklist contains required secrets and safety checks", async () =>
   const checklist = await fs.readFile(new URL("../docs/deploy-checklist.md", import.meta.url), "utf8");
 
   assert.match(checklist, /CLOUDFLARE_API_TOKEN/);
-  assert.match(checklist, /ORIGINAL_SUB_OR_NODE/);
+  assert.match(checklist, /网页输入/);
   assert.match(checklist, /SUB_TOKEN/);
   assert.match(checklist, /没有把真实 token 写进代码/);
 });
