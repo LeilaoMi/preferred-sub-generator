@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { checkCandidates, parseCfRayColo } from "../scripts/lib/check.js";
-import { collectCandidates, expandIPv4Cidr, parseCandidate, uniqueCandidates } from "../scripts/lib/candidates.js";
-import { readKvValue, writeKvValue } from "../scripts/lib/kv.js";
+import { collectCandidates, collectCandidatesWithHealth, expandIPv4Cidr, parseCandidate, uniqueCandidates } from "../scripts/lib/candidates.js";
+import { deleteKvValue, readKvValue, writeKvValue } from "../scripts/lib/kv.js";
 import { buildUpdatePayload } from "../scripts/update-kv.js";
 
 test("parse candidates from IP, host:port and URL", () => {
@@ -89,6 +89,20 @@ test("check candidates sorts by latency, expands ports and keeps colo", async ()
   assert.equal(result[0].edgeVerified, true);
 });
 
+test("check candidates can require Cloudflare ray verification", async () => {
+  const result = await checkCandidates(
+    [{ address: "a.example", port: 443 }],
+    [443],
+    {
+      requireCfRay: true,
+      allowTcpOnly: false,
+      checkOne: async () => ({ latency: 5, colo: "", edgeVerified: false }),
+    },
+  );
+
+  assert.deepEqual(result, []);
+});
+
 test("build update payload keeps top 50 checked nodes with colo names", async () => {
   const payload = await buildUpdatePayload({
     originalNode: "vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=tls&sni=example.com&type=ws&host=example.com&path=%2Fws#原始节点",
@@ -108,6 +122,9 @@ test("build update payload keeps top 50 checked nodes with colo names", async ()
   assert.equal(status.updatedAt, "2026-06-03T00:00:00.000Z");
   assert.equal(status.available, 50);
   assert.equal(status.protectedByPrevious, false);
+  assert.equal(status.requireCfRay, true);
+  assert.equal(status.allowTcpOnly, false);
+  assert.equal(JSON.parse(payload.SOURCE_HEALTH).length, 1);
   assert.equal(payload.LAST_RUN_AT, "2026-06-03T00:00:00.000Z");
   assert.equal(payload.LAST_RUN_OK, "true");
   assert.equal(payload.LAST_RUN_AVAILABLE, "50");
@@ -123,6 +140,7 @@ test("build update payload keeps previous nodes when new result is too small", a
     manualText: "1.1.1.1",
     remoteSources: [],
     previousBestIps,
+    previousStatus: { consecutiveFallbacks: 2, lastSuccessfulRefreshAt: "2026-06-02T00:00:00.000Z" },
     checkOne: async () => ({ latency: 10, colo: "LAX", edgeVerified: true }),
     now: new Date("2026-06-03T00:00:00.000Z"),
   });
@@ -132,8 +150,74 @@ test("build update payload keeps previous nodes when new result is too small", a
   assert.deepEqual(bestIps, previousBestIps);
   assert.equal(status.available, 1);
   assert.equal(status.newAvailable, 6);
+  assert.equal(status.lastRawAvailable, 6);
+  assert.equal(status.consecutiveFallbacks, 3);
+  assert.equal(status.lastSuccessfulRefreshAt, "2026-06-02T00:00:00.000Z");
   assert.equal(status.protectedByPrevious, true);
   assert.match(status.lastError, /已保留上次可用结果/);
+});
+
+test("build update payload keeps version index bounded", async () => {
+  const previousVersionIndex = Array.from({ length: 31 }, (_, index) => `BEST_IPS_OLD_${String(index).padStart(2, "0")}`);
+  const payload = await buildUpdatePayload({
+    originalNode: "vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=tls&sni=example.com&type=ws&host=example.com&path=%2Fws#原始节点",
+    manualText: "1.1.1.1\n1.1.1.2\n1.1.1.3\n1.1.1.4\n1.1.1.5\n1.1.1.6\n1.1.1.7\n1.1.1.8\n1.1.1.9\n1.1.1.10\n1.1.1.11\n1.1.1.12\n1.1.1.13\n1.1.1.14\n1.1.1.15\n1.1.1.16\n1.1.1.17\n1.1.1.18\n1.1.1.19\n1.1.1.20",
+    remoteSources: [],
+    previousVersionIndex,
+    checkOne: async (address) => ({ latency: Number(address.split(".").at(-1)), colo: "LAX", edgeVerified: true }),
+    now: new Date("2026-06-03T00:00:00.000Z"),
+  });
+
+  const index = JSON.parse(payload.BEST_IPS_VERSION_INDEX);
+  const expired = JSON.parse(payload.BEST_IPS_EXPIRED_VERSIONS);
+  assert.equal(index.length, 30);
+  assert.equal(index[0], "BEST_IPS_20260603T000000Z");
+  assert.deepEqual(expired, ["BEST_IPS_OLD_29", "BEST_IPS_OLD_30"]);
+});
+
+test("collect candidates records source health and rejects oversized source", async () => {
+  const result = await collectCandidatesWithHealth({
+    manualText: "1.1.1.1",
+    remoteSources: [
+      { name: "ok-source", url: "https://source.example/ok.txt" },
+      { name: "large-source", url: "https://source.example/large.txt", maxBytes: 5 },
+      { name: "bad-source", url: "https://source.example/bad.txt" },
+    ],
+    fetchImpl: async (url) => {
+      if (url.includes("ok")) return new Response("2.2.2.2\n3.3.3.3", { status: 200 });
+      if (url.includes("large")) return new Response("123456789", { status: 200 });
+      return new Response("server error", { status: 500 });
+    },
+  });
+
+  assert.deepEqual(result.candidates.map((item) => item.address), ["1.1.1.1", "2.2.2.2", "3.3.3.3"]);
+  assert.equal(result.sourceHealth.find((item) => item.name === "edge-manual").ok, true);
+  assert.equal(result.sourceHealth.find((item) => item.name === "ok-source").candidates, 2);
+  assert.equal(result.sourceHealth.find((item) => item.name === "large-source").ok, false);
+  assert.match(result.sourceHealth.find((item) => item.name === "large-source").error, /source too large/);
+  assert.equal(result.sourceHealth.find((item) => item.name === "bad-source").status, 500);
+});
+
+
+test("build update payload honors source max bytes and version retention options", async () => {
+  const previousVersionIndex = ["BEST_IPS_A", "BEST_IPS_B", "BEST_IPS_C"];
+  const payload = await buildUpdatePayload({
+    originalNode: "vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=tls&sni=example.com&type=ws&host=example.com&path=%2Fws#原始节点",
+    manualText: Array.from({ length: 20 }, (_, index) => `1.1.1.${index + 1}`).join("\n"),
+    remoteSources: [{ name: "too-large", url: "https://source.example/large.txt" }],
+    previousVersionIndex,
+    maxSourceBytes: 5,
+    versionRetention: 2,
+    fetchImpl: async () => new Response("123456789", { status: 200 }),
+    checkOne: async (address) => ({ latency: Number(address.split(".").at(-1)), colo: "LAX", edgeVerified: true }),
+    now: new Date("2026-06-03T00:00:00.000Z"),
+  });
+
+  const sourceHealth = JSON.parse(payload.SOURCE_HEALTH);
+  assert.equal(sourceHealth.find((item) => item.name === "too-large").ok, false);
+  assert.match(sourceHealth.find((item) => item.name === "too-large").error, /source too large/);
+  assert.equal(JSON.parse(payload.BEST_IPS_VERSION_INDEX).length, 2);
+  assert.deepEqual(JSON.parse(payload.BEST_IPS_EXPIRED_VERSIONS), ["BEST_IPS_B", "BEST_IPS_C"]);
 });
 
 test("read KV value returns text or null for missing key", async () => {
@@ -173,5 +257,23 @@ test("write KV value calls Cloudflare API without exposing secrets", async () =>
   assert.match(captured.url, /accounts\/account-id\/storage\/kv\/namespaces\/namespace-id\/values\/BEST_IPS/);
   assert.equal(captured.options.method, "PUT");
   assert.equal(captured.options.body, "[]");
+  assert.equal(captured.options.headers.Authorization, "Bearer secret-token");
+});
+
+test("delete KV value calls Cloudflare API", async () => {
+  let captured;
+  await deleteKvValue({
+    accountId: "account-id",
+    namespaceId: "namespace-id",
+    apiToken: "secret-token",
+    key: "BEST_IPS_OLD",
+    fetchImpl: async (url, options) => {
+      captured = { url, options };
+      return new Response("{}", { status: 200 });
+    },
+  });
+
+  assert.match(captured.url, /values\/BEST_IPS_OLD/);
+  assert.equal(captured.options.method, "DELETE");
   assert.equal(captured.options.headers.Authorization, "Bearer secret-token");
 });

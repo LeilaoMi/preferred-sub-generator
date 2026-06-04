@@ -16,6 +16,7 @@ function createEnv() {
   ]);
   return {
     SUB_TOKEN: "secret-token",
+    SUB_READ_TOKEN: "read-token",
     SUB_KV: {
       async get(key) { return data.get(key) || null; },
       async put(key, value) { data.set(key, value); },
@@ -25,7 +26,7 @@ function createEnv() {
 }
 
 test("sub can use template slot without putting token in subscription URL", async () => {
-  const response = await handleSub(new Request("https://example.com/sub?type=vless&template=2"), createEnv());
+  const response = await handleSub(new Request("https://example.com/sub?type=vless&template=2&t=read-token"), createEnv());
   const text = await response.text();
 
   assert.equal(response.status, 200);
@@ -33,7 +34,7 @@ test("sub can use template slot without putting token in subscription URL", asyn
 });
 
 test("best can read last version snapshot", async () => {
-  const response = await handleBest(new Request("https://example.com/best?version=last"), createEnv());
+  const response = await handleBest(new Request("https://example.com/best?version=last&t=read-token"), createEnv());
   const parsed = await response.json();
 
   assert.equal(response.status, 200);

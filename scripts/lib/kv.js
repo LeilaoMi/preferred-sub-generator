@@ -32,3 +32,20 @@ export async function readKvValue({ accountId, namespaceId, apiToken, key, fetch
   }
   return response.text();
 }
+
+export async function deleteKvValue({ accountId, namespaceId, apiToken, key, fetchImpl = fetch }) {
+  const response = await fetchImpl(
+    `https://api.cloudflare.com/client/v4/accounts/${accountId}/storage/kv/namespaces/${namespaceId}/values/${encodeURIComponent(key)}`,
+    {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+      },
+    },
+  );
+
+  if (response.status === 404) return;
+  if (!response.ok) {
+    throw new Error(`Cloudflare KV delete failed for ${key}: ${response.status}`);
+  }
+}

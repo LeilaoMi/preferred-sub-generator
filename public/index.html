@@ -201,7 +201,7 @@
         </div>
 
         <div class="actions">
-          <p class="hint">提示：点击“保存并生成”会把当前 VLESS 节点保存为模板；“仅显示订阅”不会修改模板。订阅链接本身永远不带 token。</p>
+          <p class="hint">提示：点击“保存并生成”会把当前 VLESS 节点保存为模板；“仅显示订阅”不会修改模板。订阅链接默认需要只读 token，公开模式必须显式开启。</p>
           <div class="button-row">
             <button id="showOnly" class="secondary" type="button">仅显示订阅</button>
             <button id="generate" type="button">保存并生成</button>
@@ -253,8 +253,11 @@
     const result = document.getElementById("result");
     const resultHint = document.getElementById("resultHint");
 
-    const tokenFromUrl = new URL(location.href).searchParams.get("token") || location.hash.replace(/^#token=/, "").trim();
-    if (tokenFromUrl) adminTokenInput.value = tokenFromUrl;
+    const tokenFromUrl = location.hash.replace(/^#token=/, "").trim();
+    if (tokenFromUrl) {
+      adminTokenInput.value = tokenFromUrl;
+      history.replaceState(null, "", location.pathname);
+    }
 
     const formatTime = (value) => {
       if (!value) return "暂无数据";
@@ -267,6 +270,16 @@
       return `${location.origin}${path}`;
     }
 
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        "\"": "&quot;",
+        "'": "&#39;",
+      }[char]));
+    }
+
     function renderSubscriptions() {
       const preferredFormat = formatSelect.value;
       const ordered = [...subscriptions].sort(([name, path]) => path.includes(`type=${preferredFormat}`) ? -1 : 1);
@@ -274,8 +287,8 @@
         const fullUrl = buildUrl(path);
         return `
           <div class="subscription-item">
-            <div class="sub-name">${name}</div>
-            <code id="sub-${index}">${fullUrl}</code>
+            <div class="sub-name">${escapeHtml(name)}</div>
+            <code id="sub-${index}">${escapeHtml(fullUrl)}</code>
             <button type="button" data-copy="${index}">复制</button>
           </div>
         `;
@@ -291,7 +304,7 @@
         ["TLS", preview.security],
         ["节点名", preview.name],
       ];
-      return `<ul>${rows.map(([label, value]) => `<li><strong>${label}：</strong>${value || "-"}</li>`).join("")}</ul>`;
+      return `<ul>${rows.map(([label, value]) => `<li><strong>${escapeHtml(label)}：</strong>${escapeHtml(value || "-")}</li>`).join("")}</ul>`;
     }
 
     async function copyText(text) {
@@ -325,7 +338,7 @@
 
     document.getElementById("showOnly").addEventListener("click", () => {
       result.classList.add("visible");
-      resultHint.textContent = "已显示无 token 订阅链接，未修改当前保存的 VLESS 模板。";
+      resultHint.textContent = "已显示订阅链接。默认私密模式下，请给客户端使用只读 token 或开启 SUB_PUBLIC=1。";
       renderSubscriptions();
     });
 
@@ -340,9 +353,9 @@
       } else {
         try {
           const data = await saveTemplate(nodeLink, token);
-          resultHint.innerHTML = `已保存节点模板，并生成无 token 订阅链接，可直接复制到客户端。${renderTemplatePreview(data.preview)}`;
+          resultHint.innerHTML = `已保存节点模板，并生成订阅链接。默认私密模式下，请给客户端使用只读 token 或开启 SUB_PUBLIC=1。${renderTemplatePreview(data.preview)}`;
         } catch (error) {
-          resultHint.innerHTML = `<span class='danger'>${error.message}</span>`;
+          resultHint.innerHTML = `<span class='danger'>${escapeHtml(error.message)}</span>`;
         }
       }
       renderSubscriptions();

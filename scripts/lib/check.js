@@ -93,6 +93,8 @@ export async function checkEdge(address, port, options = {}) {
   const result = await checkHttpEdge(address, port, options);
   if (result) return result;
 
+  if (options.requireCfRay && !options.allowTcpOnly) return null;
+
   const latency = await checkTcp(address, port, options.timeoutMs || 3000);
   return latency === null ? null : { latency, colo: "", edgeVerified: false };
 }
@@ -110,7 +112,7 @@ function normalizeCheckResult(result) {
   return null;
 }
 
-export async function checkCandidates(candidates, ports, { checkOne = checkEdge, concurrency = 20, checkOptions = {} } = {}) {
+export async function checkCandidates(candidates, ports, { checkOne = checkEdge, concurrency = 20, checkOptions = {}, requireCfRay = false, allowTcpOnly = true } = {}) {
   const tasks = [];
   for (const candidate of candidates) {
     const candidatePorts = candidate.port ? [candidate.port] : ports;
@@ -126,8 +128,9 @@ export async function checkCandidates(candidates, ports, { checkOne = checkEdge,
     while (cursor < tasks.length) {
       const task = tasks[cursor];
       cursor += 1;
-      const checked = normalizeCheckResult(await checkOne(task.address, task.port, checkOptions));
+      const checked = normalizeCheckResult(await checkOne(task.address, task.port, { ...checkOptions, requireCfRay, allowTcpOnly }));
       if (checked) {
+        if (requireCfRay && !checked.edgeVerified && !allowTcpOnly) continue;
         results.push({ ...task, ...checked });
       }
     }

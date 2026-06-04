@@ -94,19 +94,33 @@
     const templateInput = document.getElementById("template");
     const message = document.getElementById("message");
     const previewBox = document.getElementById("previewBox");
-    tokenInput.value = new URL(location.href).searchParams.get("token") || location.hash.replace(/^#token=/, "").trim();
+    const tokenFromUrl = location.hash.replace(/^#token=/, "").trim();
+    if (tokenFromUrl) {
+      tokenInput.value = tokenFromUrl;
+      history.replaceState(null, "", location.pathname);
+    }
 
     function setMessage(text, type = "") {
       message.textContent = text;
       message.className = `status ${type}`;
     }
 
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        "\"": "&quot;",
+        "'": "&#39;",
+      }[char]));
+    }
+
     function renderPreview(preview) {
       const fields = ["uuid", "address", "port", "security", "type", "host", "sni", "path", "name"];
       previewBox.innerHTML = fields.map((key) => `
         <div class="item">
-          <div class="key">${key}</div>
-          <div class="value">${preview[key] || "-"}</div>
+          <div class="key">${escapeHtml(key)}</div>
+          <div class="value">${escapeHtml(preview[key] || "-")}</div>
         </div>
       `).join("");
     }

@@ -4,7 +4,7 @@
 
 它的核心目标很简单：**保留你的原始 VLESS 节点参数，只把入口地址替换成测速后的 Cloudflare 高速边缘 IP，然后生成适合不同客户端导入的订阅。**
 
-> 隐私提醒：公开订阅器会接收到你的节点参数。本项目推荐部署在你自己的 Cloudflare 账号里，真实 VLESS 节点只通过网页保存到你自己的 KV，不写入 GitHub 仓库或 GitHub Secrets。
+> 隐私提醒：公开 `/sub` 等价于公开由真实 VLESS 模板派生出的完整订阅，包含 UUID、Host、SNI、path 等敏感参数。默认私密模式下，`/sub` 和 `/best` 需要只读 token；只有显式设置 `SUB_PUBLIC=1` 才会公开订阅。
 
 ## 功能特性
 
@@ -35,11 +35,15 @@
 - 提供 Cloudflare Pages Functions API：
   - `/status`
   - `/health`
+  - `/health/full`
   - `/sub`
   - `/best`
+  - `/versions`
   - `/api/template`
-- `/sub`、`/best` 默认无需 token，方便复制到客户端。
+- `/sub`、`/best` 默认需要只读 token，避免真实订阅被公开拉取。
 - `/api/template` 需要管理 token，仅用于保存或读取原始 VLESS 模板，token 不会拼进订阅链接。
+- API 默认带 noindex / nosniff / no-referrer 等安全响应头，`public/robots.txt` 默认禁止搜索引擎索引。
+- 管理接口带基础频率限制，并会清理过期/过量 IP 计数桶。
 - GitHub Actions 可每 6 小时自动刷新 Cloudflare KV 中的优选 IP。
 - 不引入 ProxyIP、SOCKS5、NAT64、中转 IP 或公益节点混合源。
 
@@ -101,6 +105,7 @@ public/index.html                中文首页，粘贴 VLESS 并生成订阅
 public/admin.html                私用模板配置页
 functions/sub.js                 订阅接口
 functions/best.js                优选 IP 列表接口
+functions/versions.js            优选 IP 版本索引接口
 functions/status.js              公开状态接口
 functions/health.js              健康检查接口
 functions/api/template.js        模板读取/保存接口
@@ -128,9 +133,14 @@ sources/edge/remote.json         远程 CF Edge 候选源
 
 ```text
 TEMPLATE   原始 VLESS 模板，由网页保存
-BEST_IPS   优选 IP 检测结果
-STATUS     更新时间、可用数量、检测状态
-TEMPLATE_AUDIT   最近一次模板保存审计信息
+BEST_IPS   最新优选 Edge IP 列表
+BEST_IPS_LAST      最近一次写入的优选结果
+BEST_IPS_LATEST_VERSION 最近版本 key
+BEST_IPS_VERSION_INDEX  最近版本索引，默认只保留 30 个 BEST_IPS_* 快照
+BEST_IPS_TREND     最近 7 次刷新趋势
+STATUS     更新时间、可用数量、检测状态、连续 fallback、最近成功刷新时间
+SOURCE_HEALTH      最近一次候选源抓取健康报告，含每源状态、候选数、错误和耗时
+TEMPLATE_AUDIT     最近一次模板更新审计信息
 LAST_RUN_*       最近一次 GitHub Actions 自动刷新结果
 ```
 
@@ -162,15 +172,28 @@ Cloudflare Pages 生产环境需要设置：
 SUB_TOKEN   管理 token，用于保存/读取原始 VLESS 模板
 ```
 
+建议同时设置：
+
+```text
+SUB_READ_TOKEN   只读 token，用于 /sub 和 /best
+```
+
+如果暂时不设置 `SUB_READ_TOKEN`，只读接口会回退使用 `SUB_TOKEN`。长期建议二者分开，避免把管理 token 放进客户端。
+
 可选环境变量：
 
 ```text
-SUB_TOKEN_NEXT     轮换 token 时临时添加的新 token
-SUB_ALLOWED_IPS    管理接口 IP 白名单，多个 IP 用英文逗号分隔
-UPDATE_WEBHOOK_URL GitHub Actions 更新完成后的通知 Webhook
+SUB_READ_TOKEN             只读 token，用于 /sub 和 /best；不设置时回退使用 SUB_TOKEN
+SUB_READ_TOKEN_NEXT        只读 token 轮换期间的新 token
+SUB_PUBLIC=1              显式恢复公开 /sub 和 /best 的旧行为，不推荐
+ALLOW_QUERY_TOKEN=1       临时允许 /api/template?token=，默认关闭
+SOURCE_MAX_BYTES=5242880  远程候选源最大读取字节数，默认 5MB
+REQUIRE_CF_RAY=1          只保留带 cf-ray 的 Cloudflare Edge 验证结果，默认开启
+ALLOW_TCP_ONLY=1          兼容 TCP 可达但无 cf-ray 的结果，默认关闭
+VERSION_RETENTION=30      BEST_IPS_* 版本快照保留数量，默认 30
 ```
 
-订阅接口 `/sub` 和 `/best` 无需 token，方便客户端导入。管理接口 `/api/template` 需要 `SUB_TOKEN`；不要把 token 拼进订阅 URL。
+订阅接口 `/sub` 和 `/best` 默认需要只读 token；管理接口 `/api/template` 需要 `SUB_TOKEN`。管理接口默认只接受 `Authorization: Bearer <SUB_TOKEN>`，不要把管理 token 拼进 URL。
 
 ## 部署到 Cloudflare Pages
 
@@ -233,7 +256,7 @@ SUB_TOKEN   管理 token，用于保存/读取原始 VLESS 模板
 需要配置 GitHub Actions Secrets：
 
 ```text
-CLOUDFLARE_API_TOKEN      用于写 KV 的 Cloudflare API Token
+CLOUDFLARE_API_TOKEN_2    用于 GitHub Actions 写 KV 的 Cloudflare API Token（当前账号）
 CLOUDFLARE_ACCOUNT_ID     Cloudflare 账号 ID
 CLOUDFLARE_NAMESPACE_ID   SUB_KV 的 Namespace ID
 ```
@@ -249,6 +272,10 @@ Actions 运行逻辑：
 检测 Cloudflare Edge 候选 IP
 写入 BEST_IPS
 写入 STATUS
+  ↓
+清理超出保留上限的 BEST_IPS_* 版本快照
+  ↓
+可选 webhook 通知；通知失败只记录 warning，不阻断 KV 更新
 ```
 
 如果还没有通过网页保存过模板，Actions 会提示缺少 `TEMPLATE`。
@@ -315,6 +342,7 @@ GET /sub?type=clash
 GET /sub?type=singbox
 GET /sub?type=shadowrocket
 GET /sub?type=v2rayng&template=1
+GET /sub?type=v2rayng&slot=1&wrap=76
 ```
 
 可选参数：
@@ -322,6 +350,8 @@ GET /sub?type=v2rayng&template=1
 ```text
 n=20        限制返回节点数量，最多 50
 template=1  使用 TEMPLATE_1 模板槽位，支持 1-5
+slot=1      使用 TEMPLATE_1 模板槽位，template 的别名
+wrap=76     v2rayNG/base64 输出按固定宽度换行，兼容老客户端/复制场景
 ```
 
 ### 优选列表
@@ -333,6 +363,15 @@ GET /best?n=20&version=last
 
 返回当前 KV 中的优选节点 JSON。`version=last` 返回最近一次版本化快照。
 
+### 优选版本
+
+```text
+GET /versions
+GET /versions?n=10
+```
+
+需要只读 token，返回最近 `BEST_IPS_*` 版本索引，不直接返回节点详情。可配合 `/best?version=...` 做回滚和诊断。
+
 ### 模板配置
 
 ```text
@@ -342,14 +381,44 @@ GET  /api/template?slot=1
 POST /api/template?slot=1
 ```
 
-`/api/template` 需要管理 token，支持：
+`/api/template` 需要管理 token，默认只接受：
 
 ```text
 Authorization: Bearer 你的SUB_TOKEN
-/api/template?token=你的SUB_TOKEN
 ```
 
 GET 只返回安全预览，不返回完整原始 VLESS。`slot=1` 到 `slot=5` 可保存多个模板槽位。
+
+读取模板安全预览：
+
+```bash
+curl -H "Authorization: Bearer 你的SUB_TOKEN" \
+  https://你的域名/api/template
+```
+
+写入模板：
+
+```bash
+curl -X POST https://你的域名/api/template \
+  -H "Authorization: Bearer 你的SUB_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"template":"vless://..."}'
+```
+
+### 健康检查
+
+```text
+GET /health
+GET /health/full
+```
+
+`/health` 只返回最小公开状态：
+
+```json
+{ "ok": true }
+```
+
+`/health/full` 需要 `Authorization: Bearer 你的SUB_TOKEN`，返回 KV、模板和优选节点数量等详细信息。
 
 ## 候选源配置
 
@@ -436,11 +505,22 @@ npm run preflight
 
 ```bash
 curl https://你的域名/status
-curl "https://你的域名/sub?type=v2rayng"
-curl "https://你的域名/best?n=20"
+curl https://你的域名/health
+curl -H "Authorization: Bearer 你的SUB_TOKEN" https://你的域名/health/full
+curl "https://你的域名/sub?type=v2rayng&t=你的SUB_READ_TOKEN"
+curl "https://你的域名/best?n=20&t=你的SUB_READ_TOKEN"
+curl "https://你的域名/versions?t=你的SUB_READ_TOKEN"
 ```
 
-订阅接口 `/sub` 和 `/best` 默认无需 token。便利性优先，但请不要公开部署域名。管理接口 `/api/template` 需要 `SUB_TOKEN`，token 只用于保存/读取模板，不会放进订阅链接。
+订阅接口 `/sub` 和 `/best` 默认需要只读 token。推荐在客户端订阅 URL 使用短参数：
+
+```text
+/sub?type=v2rayng&t=你的SUB_READ_TOKEN
+/best?n=20&t=你的SUB_READ_TOKEN
+/versions?t=你的SUB_READ_TOKEN
+```
+
+如果你明确接受公开风险，可以设置 `SUB_PUBLIC=1` 兼容旧行为。管理接口 `/api/template` 仍必须使用 `SUB_TOKEN`，且默认不接受 `?token=`。
 
 如果 `/sub` 返回没有可用节点，先确认 GitHub Actions 是否已经成功刷新 `BEST_IPS`，或者手动触发一次 Actions。
 
@@ -467,6 +547,10 @@ GitHub Secret 虽然不是公开文本，但没有必要让 GitHub Actions 持�
 ```
 
 可以在 `src/utils/colo.js` 里补充映射。
+
+## 📖 延伸阅读
+
+- [docs/audit-2026-06-04.md](docs/audit-2026-06-04.md) — 项目改进建议报告（58 条）
 
 ## 相关文档
 

@@ -10,9 +10,15 @@
 
 ## GitHub Secrets
 
-- [ ] `CLOUDFLARE_API_TOKEN`
+- [ ] `CLOUDFLARE_API_TOKEN_2`
 - [ ] `CLOUDFLARE_ACCOUNT_ID`
 - [ ] `CLOUDFLARE_NAMESPACE_ID`
+
+## Cloudflare Pages 环境变量
+
+- [ ] `SUB_TOKEN` 已设置，用于管理模板。
+- [ ] `SUB_READ_TOKEN` 已设置，用于客户端读取 `/sub` 和 `/best`；如未设置会回退使用 `SUB_TOKEN`。
+- [ ] 未设置 `SUB_PUBLIC=1`，除非你明确要公开订阅。
 
 ## 数据源
 
@@ -28,17 +34,22 @@
 ### 验证接口
 
 - [ ] `/status` 能返回 JSON。
-- [ ] `/sub?type=v2rayng` 能返回订阅，无需 token。
-- [ ] `/best?n=20` 能返回优选列表，无需 token。
+- [ ] `/health` 只返回最小公开状态，不暴露模板是否存在。
+- [ ] `/health/full` 使用 `Authorization: Bearer 你的SUB_TOKEN` 能返回详细健康信息。
+- [ ] `/sub?type=v2rayng&t=你的SUB_READ_TOKEN` 能返回订阅。
+- [ ] `/best?n=20&t=你的SUB_READ_TOKEN` 能返回优选列表。
+- [ ] `/versions?t=你的SUB_READ_TOKEN` 能返回最近版本索引。
 - [ ] `/api/template` 无 token 时返回 401。
-- [ ] `/api/template?token=你的SUB_TOKEN` 能读取或保存模板。
+- [ ] `/api/template` 使用 `Authorization: Bearer 你的SUB_TOKEN` 能读取或保存模板。
 
 ## 安全
 
 ### 安全确认
 
 - [ ] `SUB_TOKEN` 只用于 `/api/template` 管理接口。
-- [ ] 订阅链接无需 token，生成给客户端的订阅链接不要拼接 token。
+- [ ] `SUB_READ_TOKEN` 用于 `/sub` 和 `/best` 只读访问，不要使用管理 token 作为客户端订阅 token。
+- [ ] 没有开启 `SUB_PUBLIC=1`，除非你接受公开完整订阅的风险。
+- [ ] `public/robots.txt` 已禁止索引，API 响应带 noindex / nosniff 等安全头。
 - [ ] 不要公开你的部署域名给不信任的人。
 - [ ] 没有把真实 VLESS 原始节点写进仓库。
 - [ ] 如部署域名泄露，请重新部署到新域名或恢复 token 鉴权。
@@ -49,4 +60,4 @@
 - [ ] 如需限制管理来源，配置 `SUB_ALLOWED_IPS`。
 - [ ] 如需刷新通知，配置 `UPDATE_WEBHOOK_URL`。
 - [ ] 如果使用多模板，确认 `/api/template?slot=1` 和 `/sub?template=1` 行为符合预期。
-- [ ] 如需回滚优选结果，确认 `/best?version=last` 可读取最近快照。
+- [ ] 如需回滚优选结果，确认 `/versions` 可列出版本，`/best?version=last` 可读取最近快照。

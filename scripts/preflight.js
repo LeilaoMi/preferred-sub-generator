@@ -33,10 +33,14 @@ export function checkWranglerToml(content) {
 
 export function checkWorkflow(content) {
   const issues = [];
-  for (const name of ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_NAMESPACE_ID"]) {
+  for (const name of ["CLOUDFLARE_API_TOKEN_2", "CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_NAMESPACE_ID"]) {
     if (!content.includes(name)) issues.push(`GitHub Actions 缺少 ${name}`);
   }
   if (!content.includes("npm run preflight")) issues.push("GitHub Actions 未运行 npm run preflight");
+  if (!content.includes("permissions:")) issues.push("GitHub Actions 未声明最小 permissions");
+  if (!content.includes("contents: read")) issues.push("GitHub Actions permissions 未限制 contents: read");
+  if (!content.includes("concurrency:")) issues.push("GitHub Actions 未配置 concurrency");
+  if (!content.includes("timeout-minutes:")) issues.push("GitHub Actions 未配置 timeout-minutes");
   return issues;
 }
 

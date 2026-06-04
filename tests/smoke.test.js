@@ -14,6 +14,7 @@ function createEnv({ hasTemplate = true, hasBestIps = true } = {}) {
 
   return {
     SUB_TOKEN: "secret-token",
+    SUB_READ_TOKEN: "read-token",
     SUB_KV: {
       async get(key) {
         return data.get(key) || null;
@@ -54,15 +55,17 @@ test("smoke: wrong template token returns 401", async () => {
 
 test("smoke: missing TEMPLATE causes sub to fail", async () => {
   await assert.rejects(
-    () => handleSub(new Request("https://example.com/sub?type=vless"), createEnv({ hasTemplate: false })),
+    () => handleSub(new Request("https://example.com/sub?type=vless&t=read-token"), createEnv({ hasTemplate: false })),
     /Missing TEMPLATE/,
   );
 });
 
 test("smoke: empty BEST_IPS returns 503", async () => {
-  const response = await handleSub(new Request("https://example.com/sub?type=vless"), createEnv({ hasBestIps: false }));
+  const response = await handleSub(new Request("https://example.com/sub?type=vless&t=read-token"), createEnv({ hasBestIps: false }));
   const parsed = await response.json();
 
   assert.equal(response.status, 503);
-  assert.deepEqual(parsed, { error: "No available nodes" });
+  assert.equal(parsed.ok, false);
+  assert.equal(parsed.code, "NO_AVAILABLE_NODES");
+  assert.equal(parsed.error, "No available nodes");
 });

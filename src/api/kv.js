@@ -35,6 +35,13 @@ export async function readBestIpsVersion(kv, version) {
   return Array.isArray(parsed) ? parsed : [];
 }
 
+export async function readBestIpVersions(kv) {
+  const value = await kv.get("BEST_IPS_VERSION_INDEX");
+  if (!value) return [];
+  const parsed = JSON.parse(value);
+  return Array.isArray(parsed) ? parsed : [];
+}
+
 export async function readStatus(kv) {
   const value = await kv.get("STATUS");
   if (!value) return { updatedAt: null, available: 0 };

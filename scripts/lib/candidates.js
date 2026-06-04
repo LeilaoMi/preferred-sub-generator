@@ -4,6 +4,7 @@ function stripComment(line) {
 
 const DEFAULT_CIDR_SAMPLES = 4;
 const DEFAULT_CSV_MIN_SPEED = 0;
+const DEFAULT_MAX_SOURCE_BYTES = 5 * 1024 * 1024;
 
 function parseUrlCandidate(value) {
   try {
@@ -170,32 +171,91 @@ function getSourceType(source, url) {
   return (typeof source === "object" && source.type) || (url.endsWith(".csv") ? "csv" : "auto");
 }
 
-export async function collectCandidates({ manualText = "", remoteSources = [], fetchImpl = fetch } = {}) {
-  const candidates = [...parseText(manualText, "edge-manual")];
+function getSourceName(source, url) {
+  return typeof source === "string" ? source : source.name || url;
+}
+
+function getMaxBytes(source, defaultMaxBytes = DEFAULT_MAX_SOURCE_BYTES) {
+  const value = typeof source === "object" && source.maxBytes ? Number(source.maxBytes) : defaultMaxBytes;
+  return Number.isFinite(value) && value > 0 ? value : DEFAULT_MAX_SOURCE_BYTES;
+}
+
+async function readResponseText(response, maxBytes) {
+  const contentLength = Number(response.headers.get("content-length") || 0);
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    throw new Error(`source too large: ${contentLength} bytes`);
+  }
+
+  if (!response.body?.getReader) {
+    const text = await response.text();
+    if (new TextEncoder().encode(text).length > maxBytes) throw new Error(`source too large: >${maxBytes} bytes`);
+    return text;
+  }
+
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) throw new Error(`source too large: >${maxBytes} bytes`);
+    chunks.push(value);
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(merged);
+}
+
+export async function collectCandidatesWithHealth({ manualText = "", remoteSources = [], fetchImpl = fetch, maxSourceBytes = DEFAULT_MAX_SOURCE_BYTES } = {}) {
+  const manualCandidates = parseText(manualText, "edge-manual");
+  const candidates = [...manualCandidates];
+  const sourceHealth = [{ name: "edge-manual", ok: true, status: 200, candidates: manualCandidates.length, ms: 0 }];
 
   for (const source of remoteSources) {
     const url = typeof source === "string" ? source : source.url;
     if (!url) continue;
 
-    const response = await fetchImpl(url);
-    if (!response.ok) continue;
-    const body = await response.text();
-    const sourceName = typeof source === "string" ? source : source.name || url;
-    const maxCidrSamples = typeof source === "object" && source.cidrSamples ? Number(source.cidrSamples) : DEFAULT_CIDR_SAMPLES;
-    const minSpeed = typeof source === "object" && source.minSpeed ? Number(source.minSpeed) : DEFAULT_CSV_MIN_SPEED;
-    const sourceType = getSourceType(source, url);
-
-    if (sourceType === "csv") {
-      candidates.push(...parseCsv(body, sourceName, minSpeed));
-      continue;
-    }
-
+    const sourceName = getSourceName(source, url);
+    const startedAt = Date.now();
     try {
-      candidates.push(...parseJson(body, sourceName, maxCidrSamples));
-    } catch {
-      candidates.push(...parseText(body, sourceName, maxCidrSamples));
+      const response = await fetchImpl(url);
+      if (!response.ok) {
+        sourceHealth.push({ name: sourceName, ok: false, status: response.status, candidates: 0, ms: Date.now() - startedAt, error: `HTTP ${response.status}` });
+        continue;
+      }
+
+      const body = await readResponseText(response, getMaxBytes(source, maxSourceBytes));
+      const maxCidrSamples = typeof source === "object" && source.cidrSamples ? Number(source.cidrSamples) : DEFAULT_CIDR_SAMPLES;
+      const minSpeed = typeof source === "object" && source.minSpeed ? Number(source.minSpeed) : DEFAULT_CSV_MIN_SPEED;
+      const sourceType = getSourceType(source, url);
+      let parsed;
+
+      if (sourceType === "csv") {
+        parsed = parseCsv(body, sourceName, minSpeed);
+      } else {
+        try {
+          parsed = parseJson(body, sourceName, maxCidrSamples);
+        } catch {
+          parsed = parseText(body, sourceName, maxCidrSamples);
+        }
+      }
+
+      candidates.push(...parsed);
+      sourceHealth.push({ name: sourceName, ok: true, status: response.status, candidates: parsed.length, ms: Date.now() - startedAt });
+    } catch (error) {
+      sourceHealth.push({ name: sourceName, ok: false, status: 0, candidates: 0, ms: Date.now() - startedAt, error: error.message });
     }
   }
 
-  return uniqueCandidates(candidates);
+  return { candidates: uniqueCandidates(candidates), sourceHealth };
+}
+
+export async function collectCandidates(options = {}) {
+  const result = await collectCandidatesWithHealth(options);
+  return result.candidates;
 }

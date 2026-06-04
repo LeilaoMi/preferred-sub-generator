@@ -39,7 +39,7 @@ Pages 环境变量：
 在 GitHub 仓库 Settings → Secrets and variables → Actions 中配置：
 
 ```text
-CLOUDFLARE_API_TOKEN      # 用于写 KV
+CLOUDFLARE_API_TOKEN_2    # 用于 GitHub Actions 写 KV，对应当前账号的 Cloudflare API Token
 CLOUDFLARE_ACCOUNT_ID     # Cloudflare Account ID
 CLOUDFLARE_NAMESPACE_ID   # KV Namespace ID
 ```
@@ -52,12 +52,14 @@ CLOUDFLARE_NAMESPACE_ID   # KV Namespace ID
 
 ```text
 SUB_TOKEN          管理 token，用于保存/读取原始 VLESS 模板
-SUB_TOKEN_NEXT     可选，token 轮换期间使用的新 token
+SUB_READ_TOKEN     只读 token，用于访问 /sub 和 /best；未设置时回退使用 SUB_TOKEN
+SUB_TOKEN_NEXT     可选，管理 token 轮换期间使用的新 token
 SUB_ALLOWED_IPS    可选，管理接口 IP 白名单，多个 IP 用英文逗号分隔
+SUB_PUBLIC         可选，设为 1 时公开 /sub 和 /best；默认不要设置
 UPDATE_WEBHOOK_URL 可选，自动刷新完成后的通知 Webhook
 ```
 
-订阅接口 `/sub` 和 `/best` 无需 token，方便客户端导入。管理接口 `/api/template` 需要 `SUB_TOKEN`；不要把 token 拼进订阅 URL。
+订阅接口 `/sub` 和 `/best` 默认需要只读 token，避免公开泄露完整 VLESS 订阅。管理接口 `/api/template` 需要 `SUB_TOKEN`；不要把管理 token 拼进 URL。
 
 ## 5. 部署前验证
 
@@ -73,11 +75,14 @@ npm run preflight
 
 ```text
 /status
-/sub?type=vless
-/sub?type=clash
-/sub?type=singbox
-/sub?type=shadowrocket
-/best?n=20
+/health
+/health/full   # 需要 Authorization: Bearer 你的SUB_TOKEN
+/sub?type=vless&t=你的SUB_READ_TOKEN
+/sub?type=clash&t=你的SUB_READ_TOKEN
+/sub?type=singbox&t=你的SUB_READ_TOKEN
+/sub?type=shadowrocket&t=你的SUB_READ_TOKEN
+/best?n=20&t=你的SUB_READ_TOKEN
+/versions?t=你的SUB_READ_TOKEN
 ```
 
-订阅接口无需 token；请不要公开部署域名。
+订阅接口和版本索引默认需要只读 token；如必须公开，才设置 `SUB_PUBLIC=1`。公开 `/health` 只返回最小状态，详细健康信息放在需要管理 token 的 `/health/full`。

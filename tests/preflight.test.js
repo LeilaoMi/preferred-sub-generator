@@ -25,9 +25,18 @@ id = "abc123"
 });
 
 test("preflight checks workflow secrets names", () => {
-  const workflow = "CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_NAMESPACE_ID npm run preflight";
+  const workflow = "CLOUDFLARE_API_TOKEN_2 CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_NAMESPACE_ID npm run preflight permissions: contents: read concurrency: timeout-minutes:";
 
   assert.deepEqual(checkWorkflow(workflow), []);
+});
+
+test("preflight requires workflow hardening controls", () => {
+  const workflow = "CLOUDFLARE_API_TOKEN_2 CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_NAMESPACE_ID npm run preflight";
+  const issues = checkWorkflow(workflow);
+
+  assert.match(issues.join("\n"), /permissions/);
+  assert.match(issues.join("\n"), /concurrency/);
+  assert.match(issues.join("\n"), /timeout-minutes/);
 });
 
 test("preflight checks homepage safety", () => {
