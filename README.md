@@ -178,12 +178,12 @@ SUB_TOKEN   管理 token，用于保存/读取原始 VLESS 模板
 SUB_READ_TOKEN   只读 token，用于 /sub 和 /best
 ```
 
-如果暂时不设置 `SUB_READ_TOKEN`，只读接口会回退使用 `SUB_TOKEN`。长期建议二者分开，避免把管理 token 放进客户端。
+如果暂时不设置 `SUB_READ_TOKEN`，后端只读接口会回退使用 `SUB_TOKEN`；但首页不会把管理 token 自动拼进订阅 URL。长期必须二者分开，避免把管理 token 放进客户端。
 
 可选环境变量：
 
 ```text
-SUB_READ_TOKEN             只读 token，用于 /sub 和 /best；不设置时回退使用 SUB_TOKEN
+SUB_READ_TOKEN             只读 token，用于 /sub、/best、/versions；上线后首页会从 /api/read-token 读取它并自动拼到订阅 URL
 SUB_READ_TOKEN_NEXT        只读 token 轮换期间的新 token
 SUB_PUBLIC=1              显式恢复公开 /sub 和 /best 的旧行为，不推荐
 ALLOW_QUERY_TOKEN=1       临时允许 /api/template?token=，默认关闭
@@ -193,7 +193,7 @@ ALLOW_TCP_ONLY=1          兼容 TCP 可达但无 cf-ray 的结果，默认关�
 VERSION_RETENTION=30      BEST_IPS_* 版本快照保留数量，默认 30
 ```
 
-订阅接口 `/sub` 和 `/best` 默认需要只读 token；管理接口 `/api/template` 需要 `SUB_TOKEN`。管理接口默认只接受 `Authorization: Bearer <SUB_TOKEN>`，不要把管理 token 拼进 URL。
+订阅接口 `/sub`、`/best` 和 `/versions` 默认需要只读 token；管理接口 `/api/template` 需要 `SUB_TOKEN`。管理接口默认只接受 `Authorization: Bearer <SUB_TOKEN>`，不要把管理 token 拼进 URL。首页上线后会通过 `/api/read-token` 读取 Cloudflare Pages 环境变量 `SUB_READ_TOKEN`，并只把这个只读 token 自动拼进订阅链接。
 
 ## 部署到 Cloudflare Pages
 
@@ -309,7 +309,8 @@ https://你的域名/
 3. 选择默认格式，例如 `v2rayNG`。
 4. 点击“生成优选订阅”。
 5. 页面会先把原始 VLESS 保存到 KV 的 `TEMPLATE`，再生成订阅地址。
-6. 复制 v2rayNG / Clash / Sing-box / Shadowrocket 对应订阅地址导入客户端。
+6. 上线环境配置了 `SUB_READ_TOKEN` 后，页面生成的订阅地址会自动带 `t=你的SUB_READ_TOKEN`；不会带管理 token。
+7. 复制 v2rayNG / Clash / Sing-box / Shadowrocket 对应订阅地址导入客户端。
 
 ## 与 edgetunnel 2.0 配合
 
@@ -512,7 +513,7 @@ curl "https://你的域名/best?n=20&t=你的SUB_READ_TOKEN"
 curl "https://你的域名/versions?t=你的SUB_READ_TOKEN"
 ```
 
-订阅接口 `/sub` 和 `/best` 默认需要只读 token。推荐在客户端订阅 URL 使用短参数：
+订阅接口 `/sub` 和 `/best` 默认需要只读 token。推荐在客户端订阅 URL 使用短参数；首页上线后会自动读取 `SUB_READ_TOKEN` 并生成这种 URL：
 
 ```text
 /sub?type=v2rayng&t=你的SUB_READ_TOKEN

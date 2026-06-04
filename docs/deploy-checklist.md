@@ -17,7 +17,7 @@
 ## Cloudflare Pages 环境变量
 
 - [ ] `SUB_TOKEN` 已设置，用于管理模板。
-- [ ] `SUB_READ_TOKEN` 已设置，用于客户端读取 `/sub` 和 `/best`；如未设置会回退使用 `SUB_TOKEN`。
+- [ ] `SUB_READ_TOKEN` 已设置，用于客户端读取 `/sub`、`/best` 和 `/versions`；首页上线后会自动把它拼进订阅 URL。
 - [ ] 未设置 `SUB_PUBLIC=1`，除非你明确要公开订阅。
 
 ## 数据源
@@ -47,7 +47,7 @@
 ### 安全确认
 
 - [ ] `SUB_TOKEN` 只用于 `/api/template` 管理接口。
-- [ ] `SUB_READ_TOKEN` 用于 `/sub` 和 `/best` 只读访问，不要使用管理 token 作为客户端订阅 token。
+- [ ] `SUB_READ_TOKEN` 用于 `/sub`、`/best` 和 `/versions` 只读访问，不要使用管理 token 作为客户端订阅 token。
 - [ ] 没有开启 `SUB_PUBLIC=1`，除非你接受公开完整订阅的风险。
 - [ ] `public/robots.txt` 已禁止索引，API 响应带 noindex / nosniff 等安全头。
 - [ ] 不要公开你的部署域名给不信任的人。

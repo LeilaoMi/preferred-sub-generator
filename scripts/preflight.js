@@ -8,6 +8,7 @@ const REQUIRED_FILES = [
   "functions/status.js",
   "functions/health.js",
   "functions/api/template.js",
+  "functions/api/read-token.js",
   "scripts/update-kv.js",
   "sources/edge/manual.txt",
   "sources/edge/remote.json",
@@ -50,6 +51,8 @@ export function checkHomepage(content) {
   if (!content.includes("/status")) issues.push("首页未读取 /status");
   if (!content.includes("Authorization")) issues.push("首页保存模板时未发送管理 token");
   if (content.includes("secret-token")) issues.push("首页包含测试 token");
+  if (content.includes("autosub")) issues.push("首页包含写死只读 token");
+  if (!content.includes("/api/read-token")) issues.push("首页未从 /api/read-token 读取线上 SUB_READ_TOKEN");
   return issues;
 }
 

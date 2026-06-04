@@ -14,6 +14,13 @@ test("homepage is Chinese, builds protected subscription URLs, and uses admin to
   assert.match(html, /\/sub\?type=v2rayng/);
   assert.match(html, /默认需要只读 token/);
   assert.match(html, /location\.origin/);
+  assert.match(html, /let readToken = ""/);
+  assert.match(html, /fetch\("\/api\/read-token"\)/);
+  assert.match(html, /SUB_READ_TOKEN/);
+  assert.match(html, /searchParams\.set\("t", readToken\)/);
+  assert.match(html, /自动附带线上环境变量 SUB_READ_TOKEN/);
+  assert.match(html, /不会带管理 token/);
+  assert.doesNotMatch(html, /autosub/);
   assert.match(html, /api\/template/);
   assert.match(html, /Authorization/);
   assert.match(html, /已保存节点模板/);

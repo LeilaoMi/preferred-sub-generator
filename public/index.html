@@ -246,6 +246,7 @@
       ["Shadowrocket", "/sub?type=shadowrocket"],
       ["优选列表", "/best?n=20"],
     ];
+    let readToken = "";
     const adminTokenInput = document.getElementById("adminToken");
     const nodeLinkInput = document.getElementById("nodeLink");
     const formatSelect = document.getElementById("format");
@@ -267,7 +268,9 @@
     };
 
     function buildUrl(path) {
-      return `${location.origin}${path}`;
+      const url = new URL(path, location.origin);
+      if (readToken) url.searchParams.set("t", readToken);
+      return url.toString();
     }
 
     function escapeHtml(value) {
@@ -293,6 +296,18 @@
           </div>
         `;
       }).join("");
+    }
+
+
+    async function loadReadToken() {
+      try {
+        const response = await fetch("/api/read-token");
+        const data = await response.json().catch(() => ({}));
+        readToken = typeof data.readToken === "string" ? data.readToken : "";
+      } catch {
+        readToken = "";
+      }
+      renderSubscriptions();
     }
 
     function renderTemplatePreview(preview) {
@@ -338,7 +353,7 @@
 
     document.getElementById("showOnly").addEventListener("click", () => {
       result.classList.add("visible");
-      resultHint.textContent = "已显示订阅链接。默认私密模式下，请给客户端使用只读 token 或开启 SUB_PUBLIC=1。";
+      resultHint.textContent = readToken ? "已显示订阅链接，已自动附带线上环境变量 SUB_READ_TOKEN。" : "已显示订阅链接；当前部署未读取到 SUB_READ_TOKEN，订阅接口仍需要只读 token。";
       renderSubscriptions();
     });
 
@@ -349,11 +364,11 @@
       if (!nodeLink.startsWith("vless://")) {
         resultHint.innerHTML = "<span class='danger'>请先粘贴 vless:// 节点链接。</span>";
       } else if (!token) {
-        resultHint.innerHTML = "<span class='warn'>请先填写管理 token，用来保存原始 VLESS 模板。</span> 下面订阅链接本身不会带 token。";
+        resultHint.innerHTML = "<span class='warn'>请先填写管理 token，用来保存原始 VLESS 模板。</span> 上线后如果设置了 SUB_READ_TOKEN，下面订阅链接会自动附带只读 token，不会带管理 token。";
       } else {
         try {
           const data = await saveTemplate(nodeLink, token);
-          resultHint.innerHTML = `已保存节点模板，并生成订阅链接。默认私密模式下，请给客户端使用只读 token 或开启 SUB_PUBLIC=1。${renderTemplatePreview(data.preview)}`;
+          resultHint.innerHTML = `已保存节点模板，并生成订阅链接。${readToken ? "订阅链接已自动附带线上环境变量 SUB_READ_TOKEN，不会带管理 token。" : "当前部署未读取到 SUB_READ_TOKEN；请先在 Cloudflare Pages 环境变量设置 SUB_READ_TOKEN。"}${renderTemplatePreview(data.preview)}`;
         } catch (error) {
           resultHint.innerHTML = `<span class='danger'>${escapeHtml(error.message)}</span>`;
         }
@@ -362,6 +377,7 @@
     });
 
     formatSelect.addEventListener("change", renderSubscriptions);
+    loadReadToken();
     subscriptionList.addEventListener("click", async (event) => {
       const button = event.target.closest("button[data-copy]");
       if (!button) return;

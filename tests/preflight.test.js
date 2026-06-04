@@ -40,7 +40,7 @@ test("preflight requires workflow hardening controls", () => {
 });
 
 test("preflight checks homepage safety", () => {
-  const html = '<html lang="zh-CN"><script>fetch("/status"); fetch("/api/template", { headers: { Authorization: `Bearer token` } });</script></html>';
+  const html = '<html lang="zh-CN"><script>fetch("/status"); fetch("/api/read-token"); fetch("/api/template", { headers: { Authorization: `Bearer token` } });</script></html>';
 
   assert.deepEqual(checkHomepage(html), []);
 });
