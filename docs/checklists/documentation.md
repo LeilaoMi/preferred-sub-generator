@@ -15,6 +15,8 @@
 - [x] docs/roadmap-full.md 继续作为全量建议归档
 - [x] README 补充“先确认原始 VLESS 可用，再用优选订阅”
 - [x] README 补充“禁止公开管理 token 给不信任用户”
+- [x] README 补充 `/api/read-token` 和当前实际线上部署状态
+- [x] docs/cloudflare-setup.md 按当前部署域名、Pages 项目、KV、环境变量完整重写
 
 ## 验收标准
 - 新人读完文档，不会误把管理 token 放进订阅 URL

@@ -38,7 +38,7 @@ git diff --check：通过
 
 部署：
 ```text
-CLOUDFLARE_API_TOKEN="$CLOUDFLARE_API_TOKEN_2" npx wrangler pages deploy public --project-name preferred-sub-generator --branch main --commit-dirty=true
+CLOUDFLARE_API_TOKEN="$CLOUDFLARE_API_TOKEN_2" npx wrangler pages deploy public --project-name preferred-sub-generator-zrd --branch main --commit-dirty=true
 ```
 
 部署成功预览：

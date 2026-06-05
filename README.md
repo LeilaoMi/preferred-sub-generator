@@ -39,6 +39,7 @@
   - `/sub`
   - `/best`
   - `/versions`
+  - `/api/read-token`
   - `/api/template`
 - `/sub`、`/best` 默认需要只读 token，避免真实订阅被公开拉取。
 - `/api/template` 需要管理 token，仅用于保存或读取原始 VLESS 模板，token 不会拼进订阅链接。
@@ -79,6 +80,30 @@ wrangler.toml Pages 输出目录和 KV 绑定
 
 Cloudflare Pages 是推荐部署方式，也是当前仓库实际验证的部署方式。
 
+## 当前实际线上状态
+
+当前仓库已按 Cloudflare Pages 方式部署并验证。
+
+```text
+生产自定义域名：https://yxdy.woniu.bee.al
+Pages 项目名：preferred-sub-generator-zrd
+最近验证预览：https://b2f90a26.preferred-sub-generator-zrd.pages.dev
+KV 绑定变量：SUB_KV
+KV Namespace ID：9c1be2549489489ca8c55c5886b56b3d
+```
+
+当前线上关键行为：
+
+```text
+/status                         公开状态接口，HTTP 200
+/health                         公开最小健康检查，HTTP 200
+/api/read-token                 返回是否配置 SUB_READ_TOKEN，HTTP 200
+/sub?type=v2rayng&t=只读token   返回 v2rayNG base64 订阅，HTTP 200
+/best?n=2&t=只读token           返回优选 IP JSON，HTTP 200
+```
+
+真实 token 只保存在 Cloudflare Pages 环境变量中，仓库不保存、不展示。首页会在浏览器中请求 `/api/read-token`，读取线上 `SUB_READ_TOKEN` 后自动把 `t=只读token` 拼进订阅链接；管理 token `SUB_TOKEN` 不会进入订阅 URL。
+
 ### 可配合 GitHub Actions
 
 GitHub Actions 不负责部署页面，它负责定时刷新 KV：
@@ -108,6 +133,7 @@ functions/best.js                优选 IP 列表接口
 functions/versions.js            优选 IP 版本索引接口
 functions/status.js              公开状态接口
 functions/health.js              健康检查接口
+functions/api/read-token.js      读取 Pages 环境变量 SUB_READ_TOKEN，用于首页自动拼订阅 URL
 functions/api/template.js        模板读取/保存接口
 src/parser/vless.js              VLESS 解析
 src/generator/vless.js           VLESS 生成
@@ -157,7 +183,7 @@ id = "你的 KV Namespace ID"
 建议配置：
 
 ```text
-项目名：preferred-sub-generator
+项目名：preferred-sub-generator-zrd
 构建命令：留空
 构建输出目录：public
 Functions 目录：functions
@@ -204,7 +230,7 @@ VERSION_RETENTION=30      BEST_IPS_* 版本快照保留数量，默认 30
 ```bash
 npm test
 npm run preflight
-npx wrangler pages deploy public --project-name preferred-sub-generator --branch main --commit-dirty=true
+npx wrangler pages deploy public --project-name preferred-sub-generator-zrd --branch main --commit-dirty=true
 ```
 
 如果需要指定账号和 token：
@@ -212,7 +238,7 @@ npx wrangler pages deploy public --project-name preferred-sub-generator --branch
 ```bash
 CLOUDFLARE_ACCOUNT_ID=你的账号ID \
 CLOUDFLARE_API_TOKEN=你的API_TOKEN \
-npx wrangler pages deploy public --project-name preferred-sub-generator --branch main --commit-dirty=true
+npx wrangler pages deploy public --project-name preferred-sub-generator-zrd --branch main --commit-dirty=true
 ```
 
 ### 方式 B：Cloudflare Dashboard 连接 GitHub
@@ -373,6 +399,14 @@ GET /versions?n=10
 
 需要只读 token，返回最近 `BEST_IPS_*` 版本索引，不直接返回节点详情。可配合 `/best?version=...` 做回滚和诊断。
 
+### 读取只读订阅 token
+
+```text
+GET /api/read-token
+```
+
+公开接口，只返回 Cloudflare Pages 是否配置了 `SUB_READ_TOKEN` 以及该只读 token 的值，用于首页自动生成可直接导入客户端的订阅 URL。这个接口不会返回管理 token `SUB_TOKEN`。
+
 ### 模板配置
 
 ```text
@@ -513,7 +547,7 @@ curl "https://你的域名/best?n=20&t=你的SUB_READ_TOKEN"
 curl "https://你的域名/versions?t=你的SUB_READ_TOKEN"
 ```
 
-订阅接口 `/sub` 和 `/best` 默认需要只读 token。推荐在客户端订阅 URL 使用短参数；首页上线后会自动读取 `SUB_READ_TOKEN` 并生成这种 URL：
+订阅接口 `/sub`、`/best` 和 `/versions` 默认需要只读 token。推荐在客户端订阅 URL 使用短参数；首页上线后会通过 `/api/read-token` 自动读取 `SUB_READ_TOKEN` 并生成这种 URL：
 
 ```text
 /sub?type=v2rayng&t=你的SUB_READ_TOKEN
