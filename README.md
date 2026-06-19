@@ -100,6 +100,7 @@ KV Namespace ID：9c1be2549489489ca8c55c5886b56b3d
 /api/read-token                 返回是否配置 SUB_READ_TOKEN，HTTP 200
 /sub?type=v2rayng&t=只读token   返回 v2rayNG base64 订阅，HTTP 200
 /best?n=2&t=只读token           返回优选 IP JSON，HTTP 200
+/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000  edgetunnel 探测旁路，免 token 返回占位 base64 订阅（UA 需含 edgetunnel）
 ```
 
 真实 token 只保存在 Cloudflare Pages 环境变量中，仓库不保存、不展示。首页会在浏览器中请求 `/api/read-token`，读取线上 `SUB_READ_TOKEN` 后自动把 `t=只读token` 拼进订阅链接；管理 token `SUB_TOKEN` 不会进入订阅 URL。
@@ -338,17 +339,41 @@ https://你的域名/
 6. 上线环境配置了 `SUB_READ_TOKEN` 后，页面生成的订阅地址会自动带 `t=你的SUB_READ_TOKEN`；不会带管理 token。
 7. 复制 v2rayNG / Clash / Sing-box / Shadowrocket 对应订阅地址导入客户端。
 
-## 与 edgetunnel 2.0 配合
+## 与 edgetunnel 配合
 
-如果你使用 edgetunnel 2.0：
+本项目支持两种 edgetunnel 接入方式。
+
+### cmliu 版 edgetunnel（带 `sub://` 优选订阅生成器）
+
+cmliu 版 edgetunnel 用 `sub://` 协议对接外部"优选订阅生成器"。它的处理逻辑是：
+
+1. 把你填的 `sub://host...` 中的 `sub://` 换成 `https://`，并**丢弃 `#` 和 `?` 之后的所有内容**——所以你在 `sub://` 后面带的 `?t=`、`?type=` 都会被砍掉，不起作用。
+2. 自己拼一个固定探测请求：`https://host/sub?host=example.com&uuid=00000000-0000-4000-8000-8000-000000000000`，UA 含 `edgetunnel`。
+3. 用 `atob()` 解码响应，识别其中带全 0 uuid + `example.com` 的行，提取 `域名:端口#备注` 作为优选 IP。
+
+因此对接这种 edgetunnel 时：
+
+- **不需要也无法带 token**：cmliu 版会砍掉 query 参数。
+- 在 edgetunnel 的"优选订阅地址"里直接填：
+
+```text
+sub://yxdy.woniu.bee.al
+```
+
+- 不要加 `?t=` 或 `?type=`，加了也会被丢弃且无意义。
+
+本项目已内置 edgetunnel 探测旁路：当 `/sub` 收到同时满足 `host=example.com` + `uuid=全0` + UA 含 `edgetunnel` 的请求时，免只读 token 放行，返回 base64 编码的占位订阅——节点用占位 `uuid=00000000-...` 和 `host=example.com` 生成，**不会泄露真实 UUID / Host / SNI**。其它非探测请求仍必须带只读 token，私密模式不受影响。
+
+### edgetunnel 2.0（zizifn 风格，直接给订阅 URL）
+
+edgetunnel 2.0 不走 `sub://` 探测协议，直接把订阅 URL 当普通订阅导入：
 
 1. 先在 edgetunnel 2.0 生成或复制你的 VLESS 节点。
 2. 确认该原始 VLESS 在客户端里单独导入可用。
-3. 把这个 VLESS 粘贴到本项目网页。
-4. 点击生成优选订阅。
-5. 将生成出的订阅 URL 导入 v2rayNG、Clash、Sing-box 等客户端。
+3. 把这个 VLESS 粘贴到本项目网页，生成优选订阅。
+4. 把生成的带 token 订阅 URL（`/sub?type=v2rayng&t=只读token`）导入 v2rayNG、Clash、Sing-box 等客户端。
 
-注意：edgetunnel 2.0 的原始节点如果本身不可用，本项目生成出的优选订阅也通常不可用。
+注意：原始 VLESS 如果本身不可用，生成出的优选订阅通常也不可用。
 
 ## API 说明
 
@@ -380,6 +405,8 @@ template=1  使用 TEMPLATE_1 模板槽位，支持 1-5
 slot=1      使用 TEMPLATE_1 模板槽位，template 的别名
 wrap=76     v2rayNG/base64 输出按固定宽度换行，兼容老客户端/复制场景
 ```
+
+特殊：edgetunnel 探测旁路。当请求同时满足 `host=example.com` + `uuid=00000000-0000-4000-8000-000000000000` + UA 含 `edgetunnel` 时，`/sub` 免只读 token 放行，固定返回 base64 编码的占位订阅（占位 uuid/host，不泄露真实参数），用于对接 cmliu 版 edgetunnel 的 `sub://` 协议。详见「与 edgetunnel 配合」。
 
 ### 优选列表
 
@@ -545,6 +572,7 @@ curl -H "Authorization: Bearer 你的SUB_TOKEN" https://你的域名/health/full
 curl "https://你的域名/sub?type=v2rayng&t=你的SUB_READ_TOKEN"
 curl "https://你的域名/best?n=20&t=你的SUB_READ_TOKEN"
 curl "https://你的域名/versions?t=你的SUB_READ_TOKEN"
+curl -H "User-Agent: v2rayN/edgetunnel (https://github.com/cmliu/edgetunnel)" "https://你的域名/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000"
 ```
 
 订阅接口 `/sub`、`/best` 和 `/versions` 默认需要只读 token。推荐在客户端订阅 URL 使用短参数；首页上线后会通过 `/api/read-token` 自动读取 `SUB_READ_TOKEN` 并生成这种 URL：
@@ -572,6 +600,10 @@ curl "https://你的域名/versions?t=你的SUB_READ_TOKEN"
 ### 为什么不要把原始 VLESS 写进 GitHub Secret？
 
 GitHub Secret 虽然不是公开文本，但没有必要让 GitHub Actions 持有真实节点。网页保存到你自己的 Cloudflare KV 更符合私用场景。
+
+### edgetunnel 仍然显示 `Unauthorized` 怎么办？
+
+确认你填的是 `sub://你的订阅生成器域名`，不要把 `?t=...` 直接拼在 `sub://` 后面。cmliu 版 edgetunnel 会忽略 `sub://` 后面的 query，并自己发起探测请求；本项目已专门兼容它的探测请求，但普通订阅请求仍然需要只读 token。
 
 ### COLO 不认识怎么办？
 

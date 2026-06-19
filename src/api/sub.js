@@ -9,6 +9,16 @@ import { readBestIps, readTemplate } from "./kv.js";
 
 const MAX_NODES = 50;
 
+const EDGE_PROBE_UUID = "00000000-0000-4000-8000-000000000000";
+
+function isEdgetunnelProbe(url, request) {
+  const uuid = (url.searchParams.get("uuid") || "").toLowerCase();
+  const ua = (request.headers.get("user-agent") || "").toLowerCase();
+  return url.searchParams.get("host") === "example.com"
+    && uuid === EDGE_PROBE_UUID
+    && ua.includes("edgetunnel");
+}
+
 function templateKeyFromUrl(url) {
   const slot = url.searchParams.get("slot") || url.searchParams.get("template") || "";
   if (!slot) return "TEMPLATE";
@@ -52,16 +62,23 @@ function wrapText(text, width) {
 }
 
 export async function handleSub(request, env) {
-  const auth = requireReadAuth(request, env);
+  const url = new URL(request.url);
+  const edgeProbe = isEdgetunnelProbe(url, request);
+
+  const auth = edgeProbe ? { authorized: true } : requireReadAuth(request, env);
   if (!auth.authorized) return unauthorizedResponse();
 
-  const url = new URL(request.url);
-  const type = (url.searchParams.get("type") || "vless").toLowerCase();
+  const type = edgeProbe ? "base64" : (url.searchParams.get("type") || "vless").toLowerCase();
   const template = await readTemplate(env.SUB_KV, templateKeyFromUrl(url));
   const nodes = (await readBestIps(env.SUB_KV)).slice(0, getLimit(url, MAX_NODES));
 
   if (nodes.length === 0) {
     return jsonResponse(errorPayload("NO_AVAILABLE_NODES", "No available nodes"), 503);
+  }
+
+  if (edgeProbe) {
+    const probeTemplate = { ...template, uuid: EDGE_PROBE_UUID, host: "example.com", sni: "example.com", path: "/" };
+    return privateTextResponse(base64Encode(generateVlessSubscription(probeTemplate, nodes)), "text/plain; charset=utf-8", subscriptionHeaders("preferred-sub-edge.txt"));
   }
 
   if (type === "vless") {
