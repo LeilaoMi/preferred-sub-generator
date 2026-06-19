@@ -236,6 +236,15 @@
             <div class="value" id="speedtestLocation" style="font-size: 16px; color: var(--text);">读取中</div>
           </div>
         </div>
+        <div style="margin-top: 18px; padding: 16px; border: 1px solid var(--border); border-radius: 18px; background: rgba(2, 6, 23, 0.38);">
+          <div class="label">本地测速反馈</div>
+          <p style="font-size: 13px; color: var(--muted); margin: 8px 0 12px;">在国内浏览器点一下，测你当前到 Cloudflare 的真实速度，数据回传后用于优化国内优选。你测出的接入点才是你本地的真实节点。</p>
+          <div id="speedtestResult" style="font-size: 14px; color: var(--text); margin-bottom: 12px; min-height: 20px;">点下方按钮开始测速</div>
+          <div class="button-row">
+            <button id="runSpeedtest" class="secondary" type="button">开始测速</button>
+            <button id="submitFeedback" class="secondary" type="button" disabled>回传反馈</button>
+          </div>
+        </div>
       </aside>
     </section>
 
@@ -402,6 +411,59 @@
       .catch(() => {
         document.getElementById("updatedAt").textContent = "状态读取失败";
       });
+
+    const speedtestResult = document.getElementById("speedtestResult");
+    const runSpeedtestButton = document.getElementById("runSpeedtest");
+    const submitFeedbackButton = document.getElementById("submitFeedback");
+    if (submitFeedbackButton) submitFeedbackButton.style.display = "none";
+    let latestSpeedtest = null;
+
+    runSpeedtestButton.addEventListener("click", async () => {
+      runSpeedtestButton.disabled = true;
+      runSpeedtestButton.textContent = "测速中…";
+      speedtestResult.textContent = "正在获取接入点信息…";
+      latestSpeedtest = null;
+      try {
+        const traceText = await (await fetch("/cdn-cgi/trace", { cache: "no-store" })).text();
+        const colo = (traceText.match(/colo=(\w+)/) || [])[1] || "";
+        const loc = (traceText.match(/loc=(\w+)/) || [])[1] || "";
+        speedtestResult.textContent = `接入点 ${colo}(${loc})，正在测下载速度…`;
+        const bytes = 10000000;
+        const start = performance.now();
+        const resp = await fetch(`https://speed.cloudflare.com/__down?bytes=${bytes}`, { cache: "no-store" });
+        if (!resp.body) throw new Error("浏览器不支持流式读取");
+        const reader = resp.body.getReader();
+        let received = 0;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          received += value.length;
+        }
+        const elapsed = (performance.now() - start) / 1000;
+        if (elapsed <= 0 || received <= 0) throw new Error("测速数据异常");
+        const speedMbps = Math.round(((received * 8) / (elapsed * 1000000)) * 100) / 100;
+        latestSpeedtest = { colo, ipCountry: loc, speedMbps };
+        speedtestResult.textContent = `接入点 ${colo}(${loc}) | 下载 ${speedMbps} Mbps`;
+        const fbResp = await fetch("/api/speedtest-feedback", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Accept": "application/json" },
+          body: JSON.stringify(latestSpeedtest),
+        });
+        const fbData = await fbResp.json();
+        if (!fbResp.ok || !fbData.ok) throw new Error(fbData.error || "回传失败");
+        speedtestResult.textContent = `接入点 ${colo}(${loc}) | 下载 ${speedMbps} Mbps | 已回传 ✓`;
+      } catch (error) {
+        speedtestResult.textContent = `测速失败：${error.message}`;
+      } finally {
+        runSpeedtestButton.disabled = false;
+        runSpeedtestButton.textContent = "开始测速";
+      }
+    });
+
+    submitFeedbackButton.addEventListener("click", async () => {
+      if (!latestSpeedtest) return;
+      speedtestResult.textContent = "已回传，无需重复操作";
+    });
 
     renderSubscriptions();
   </script>
