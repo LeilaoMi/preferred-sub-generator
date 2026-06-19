@@ -86,7 +86,7 @@ Cloudflare Pages 是推荐部署方式，也是当前仓库实际验证的部署
 
 ```text
 生产自定义域名：https://yxdy.woniu.bee.al
-Pages 项目名：preferred-sub-generator-zrd
+Pages 项目名：preferred-sub-generator
 最近验证预览：https://b2f90a26.preferred-sub-generator-zrd.pages.dev
 KV 绑定变量：SUB_KV
 KV Namespace ID：9c1be2549489489ca8c55c5886b56b3d
