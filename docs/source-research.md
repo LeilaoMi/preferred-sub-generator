@@ -69,6 +69,10 @@
 | `cm.soso.edu.kg` | 根路径跳 Telegram，`/sub` 返回 202 | 疑似 `WorkerVless2sub` 类部署，入口做了隐藏或跳转 |
 | `sub.xinyitang.dpdns.org` | 403 | 疑似 `WorkerVless2sub` 生态部署，但源码根源未确认 |
 
+## 本次额外结论
+
+公开带宽源稀缺，且多数公开订阅器依赖外部转换后端处理私有节点，存在隐私风险。
+
 ## 当前项目采用策略
 
 1. 只读取 `sources/edge/*`。
@@ -77,6 +81,7 @@
 4. 支持 cmliu CloudflareSpeedTest CSV 源，并用速度下限过滤。
 5. 输出的候选节点只代表 Cloudflare Edge 入口可达，不保证用户原始 VLESS 后端可用。
 6. 用户原始节点必须自己可用；本项目不能修复错误 UUID、Host、SNI、path、TLS 或后端服务不可用。
+7. 测速策略：优先使用 CloudflareSpeedTest CSV 源，结合速度下限过滤低速节点。
 
 ## 隐私原则
 

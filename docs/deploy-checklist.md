@@ -41,6 +41,7 @@
 - [ ] `/versions?t=你的SUB_READ_TOKEN` 能返回最近版本索引。
 - [ ] `/api/template` 无 token 时返回 401。
 - [ ] `/api/template` 使用 `Authorization: Bearer 你的SUB_TOKEN` 能读取或保存模板。
+- [ ] `/api/template` 无 token 返回 401 之后，使用 `Authorization: Bearer 你的SUB_TOKEN` 能正常访问。
 
 ## 安全
 

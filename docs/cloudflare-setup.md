@@ -7,7 +7,7 @@
 ```text
 生产自定义域名：https://yxdy.woniu.bee.al
 Pages 项目名：preferred-sub-generator-zrd
-最近验证预览：https://b2f90a26.preferred-sub-generator-zrd.pages.dev
+最近验证预览：https://3b090ee2.pre
 KV 绑定变量：SUB_KV
 KV Namespace ID：9c1be2549489489ca8c55c5886b56b3d
 ```
@@ -37,6 +37,7 @@ BEST_IPS_TREND           最近 7 次刷新趋势
 STATUS                   更新时间、可用数量、检测状态等
 SOURCE_HEALTH            最近一次候选源抓取健康报告
 TEMPLATE_AUDIT           最近一次模板更新审计信息
+SPEED_FEEDBACK           浏览器本地测速反馈
 LAST_RUN_*               最近一次 GitHub Actions 自动刷新结果
 ```
 

@@ -18,6 +18,9 @@
   - amclubs `ipv4.txt`。
   - 本地手动源 `sources/edge/manual.txt`。
 - 自动检测候选 IP 的可达性、延迟和 Cloudflare COLO。
+- 排序策略：**优先按带宽（speed）降序**，带宽数据来自 CSV 源的下载速度；无带宽数据的候选回退按延迟升序。国内访问场景下带宽比延迟更能反映实际体验。
+- 提供浏览器本地测速反馈面板：首页「开始测速」按钮在用户浏览器本地通过 Cloudflare 官方端点 `speed.cloudflare.com/__down` 实测下载速度，结果回传 `/api/speedtest-feedback` 存入 KV，可用于验证国内真实访问质量。
+- `/status` 会标注测速地点（`speedtestLocation`，当前为 `GitHub Actions (US)`）和平均带宽（`averageSpeed`），让你清楚知道候选 IP 的延迟是在哪测的。
 - 订阅节点名称支持中文友好 COLO 展示，例如：
 
 ```text
@@ -86,8 +89,8 @@ Cloudflare Pages 是推荐部署方式，也是当前仓库实际验证的部署
 
 ```text
 生产自定义域名：https://yxdy.woniu.bee.al
-Pages 项目名：preferred-sub-generator
-最近验证预览：https://b2f90a26.preferred-sub-generator-zrd.pages.dev
+Pages 项目名：preferred-sub-generator-zrd
+最近验证预览：https://3b090ee2.preferred-sub-generator-zrd.pages.dev
 KV 绑定变量：SUB_KV
 KV Namespace ID：9c1be2549489489ca8c55c5886b56b3d
 ```
@@ -95,9 +98,10 @@ KV Namespace ID：9c1be2549489489ca8c55c5886b56b3d
 当前线上关键行为：
 
 ```text
-/status                         公开状态接口，HTTP 200
+/status                         公开状态接口，HTTP 200，含 speedtestLocation / averageSpeed
 /health                         公开最小健康检查，HTTP 200
 /api/read-token                 返回是否配置 SUB_READ_TOKEN，HTTP 200
+/api/speedtest-feedback         POST 公开回传浏览器本地测速结果（colo/speed）；GET 需管理 token 查看汇总
 /sub?type=v2rayng&t=只读token   返回 v2rayNG base64 订阅，HTTP 200
 /best?n=2&t=只读token           返回优选 IP JSON，HTTP 200
 /sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000  edgetunnel 探测旁路，免 token 返回占位 base64 订阅（UA 需含 edgetunnel）
@@ -136,12 +140,14 @@ functions/status.js              公开状态接口
 functions/health.js              健康检查接口
 functions/api/read-token.js      读取 Pages 环境变量 SUB_READ_TOKEN，用于首页自动拼订阅 URL
 functions/api/template.js        模板读取/保存接口
+functions/api/speedtest-feedback.js  浏览器本地测速结果回传与汇总
 src/parser/vless.js              VLESS 解析
 src/generator/vless.js           VLESS 生成
 src/generator/clash.js           Clash/Mihomo 输出
 src/generator/singbox.js         Sing-box 输出
 src/generator/shadowrocket.js    Shadowrocket 输出
 src/utils/colo.js                COLO 中文命名
+src/api/speedtest-feedback.js    测速反馈接收、KV 存储与汇总
 scripts/update-kv.js             聚合、检测并写入 KV
 scripts/lib/candidates.js        候选源解析
 scripts/lib/check.js             TCP/HTTP Edge 检测
@@ -168,6 +174,7 @@ BEST_IPS_TREND     最近 7 次刷新趋势
 STATUS     更新时间、可用数量、检测状态、连续 fallback、最近成功刷新时间
 SOURCE_HEALTH      最近一次候选源抓取健康报告，含每源状态、候选数、错误和耗时
 TEMPLATE_AUDIT     最近一次模板更新审计信息
+SPEED_FEEDBACK     浏览器本地测速反馈记录，最多保留 100 条，由 /api/speedtest-feedback 写入
 LAST_RUN_*       最近一次 GitHub Actions 自动刷新结果
 ```
 
@@ -434,6 +441,24 @@ GET /api/read-token
 
 公开接口，只返回 Cloudflare Pages 是否配置了 `SUB_READ_TOKEN` 以及该只读 token 的值，用于首页自动生成可直接导入客户端的订阅 URL。这个接口不会返回管理 token `SUB_TOKEN`。
 
+### 测速反馈
+
+```text
+POST /api/speedtest-feedback
+GET  /api/speedtest-feedback
+```
+
+`POST` 公开接口，接收浏览器本地测速结果：用 Cloudflare 官方端点 `speed.cloudflare.com/__down?bytes=10000000` 在用户浏览器本地实测下载速度，附带 `/cdn-cgi/trace` 拿到的 COLO 和 ISP，回传后端存入 KV 的 `SPEED_FEEDBACK`（最多 100 条）。带基础频率限制。
+
+`GET` 需要管理 token，返回测速反馈汇总（平均速度、最高速度、COLO 分布）和明细列表。
+
+读取测速汇总：
+
+```bash
+curl -H "Authorization: Bearer 你的SUB_TOKEN" \
+  https://你的域名/api/speedtest-feedback
+```
+
 ### 模板配置
 
 ```text
@@ -573,6 +598,7 @@ curl "https://你的域名/sub?type=v2rayng&t=你的SUB_READ_TOKEN"
 curl "https://你的域名/best?n=20&t=你的SUB_READ_TOKEN"
 curl "https://你的域名/versions?t=你的SUB_READ_TOKEN"
 curl -H "User-Agent: v2rayN/edgetunnel (https://github.com/cmliu/edgetunnel)" "https://你的域名/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000"
+curl -H "Authorization: Bearer 你的SUB_TOKEN" "https://你的域名/api/speedtest-feedback"
 ```
 
 订阅接口 `/sub`、`/best` 和 `/versions` 默认需要只读 token。推荐在客户端订阅 URL 使用短参数；首页上线后会通过 `/api/read-token` 自动读取 `SUB_READ_TOKEN` 并生成这种 URL：
@@ -604,6 +630,10 @@ GitHub Secret 虽然不是公开文本，但没有必要让 GitHub Actions 持�
 ### edgetunnel 仍然显示 `Unauthorized` 怎么办？
 
 确认你填的是 `sub://你的订阅生成器域名`，不要把 `?t=...` 直接拼在 `sub://` 后面。cmliu 版 edgetunnel 会忽略 `sub://` 后面的 query，并自己发起探测请求；本项目已专门兼容它的探测请求，但普通订阅请求仍然需要只读 token。
+
+### 为什么优选 IP 选出来全是美国/带宽显示 None？
+
+测速在 GitHub Actions（美国）跑，候选来自 CF 官方 IP 段和社区源，Anycast 导致从美国探测到的多是美国节点；GitHub Actions 无法对 CF 边缘 IP 做带宽下载测速（speed.cloudflare.com 在 GHA 环境测速结果不代表国内），所以 averageSpeed 显示 None。要反映国内真实速度，请用首页「开始测速」按钮在本地浏览器测，结果会回传到 /api/speedtest-feedback。
 
 ### COLO 不认识怎么办？
 
