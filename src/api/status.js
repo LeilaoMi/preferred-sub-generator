@@ -31,6 +31,10 @@ export async function handleStatus(request, env) {
     stale,
     unhealthy,
     ageSeconds: age === null ? null : Math.round(age / 1000),
+    speedtestLocation: status.speedtestLocation || null,
+    speedTestNote: status.speedTestNote || null,
+    averageSpeed: status.averageSpeed ?? null,
+    averageLatency: status.averageLatency ?? null,
     status: semanticStatus,
   });
 }
