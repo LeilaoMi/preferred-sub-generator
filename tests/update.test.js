@@ -89,6 +89,38 @@ test("check candidates sorts by latency, expands ports and keeps colo", async ()
   assert.equal(result[0].edgeVerified, true);
 });
 
+test("check candidates sorts by speed descending when bandwidth data present", async () => {
+  // 模拟国内场景：延迟低但带宽低的节点 应排在 延迟高但带宽高的节点 之后
+  const candidates = [
+    { address: "low-latency", port: 443, speed: 3.2 },   // 低带宽
+    { address: "high-bandwidth", port: 443, speed: 11.6 }, // 高带宽
+    { address: "no-speed", port: 443 },                   // 无带宽数据
+  ];
+  const result = await checkCandidates(candidates, [443], {
+    checkOne: async (address) => ({
+      latency: address === "low-latency" ? 12 : address === "high-bandwidth" ? 73 : 50,
+      colo: "NRT",
+      edgeVerified: true,
+    }),
+  });
+
+  // 高带宽排第一，低带宽第二，无带宽排最后
+  assert.deepEqual(result.map((item) => item.address), ["high-bandwidth", "low-latency", "no-speed"]);
+  assert.equal(result[0].speed, 11.6);
+});
+
+test("check candidates falls back to latency when no speed data", async () => {
+  const result = await checkCandidates(
+    [{ address: "a.example", port: null }],
+    [443, 8443],
+    {
+      checkOne: async (address, port) => (port === 443 ? { latency: 20, colo: "LAX", edgeVerified: true } : { latency: 10, colo: "SJC", edgeVerified: true }),
+    },
+  );
+
+  assert.deepEqual(result.map((item) => item.port), [8443, 443]);
+});
+
 test("check candidates can require Cloudflare ray verification", async () => {
   const result = await checkCandidates(
     [{ address: "a.example", port: 443 }],
@@ -119,11 +151,13 @@ test("build update payload keeps top 50 checked nodes with colo names", async ()
   assert.equal(bestIps[0].address, "1.1.1.1");
   assert.equal(bestIps[0].name, "🇺🇸 美国洛杉矶 LAX 1ms #1");
   assert.equal(bestIps[0].colo, "LAX");
+  assert.equal(bestIps[0].speed, null);
   assert.equal(status.updatedAt, "2026-06-03T00:00:00.000Z");
   assert.equal(status.available, 50);
   assert.equal(status.protectedByPrevious, false);
   assert.equal(status.requireCfRay, true);
   assert.equal(status.allowTcpOnly, false);
+  assert.equal(status.averageSpeed, null);
   assert.equal(JSON.parse(payload.SOURCE_HEALTH).length, 1);
   assert.equal(payload.LAST_RUN_AT, "2026-06-03T00:00:00.000Z");
   assert.equal(payload.LAST_RUN_OK, "true");
@@ -131,6 +165,29 @@ test("build update payload keeps top 50 checked nodes with colo names", async ()
   assert.equal(JSON.parse(payload.BEST_IPS_LAST).length, 50);
   assert.equal(JSON.parse(payload.BEST_IPS_TREND).length, 1);
   assert.equal(status.available, 50);
+});
+
+test("build update payload records speed when CSV source provides bandwidth", async () => {
+  const csv = [
+    "IP地址,端口,回源端口,TLS,数据中心,地区,城市,TCP延迟(ms),速度(MB/s)",
+    "141.147.162.204,443,443,true,NRT,Asia Pacific,Tokyo,73,11.59",
+    "130.61.203.115,443,443,true,FRA,Europe,Frankfurt,195,5.0",
+  ].join("\n");
+  const payload = await buildUpdatePayload({
+    originalNode: "vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=tls&sni=example.com&type=ws&host=example.com&path=%2Fws#原始节点",
+    remoteSources: [{ name: "csv", url: "https://source.example/addressescsv.csv", type: "csv", minSpeed: 0 }],
+    checkOne: async (address) => ({ latency: 50, colo: "NRT", edgeVerified: true }),
+    fetchImpl: async () => new Response(csv),
+    now: new Date("2026-06-03T00:00:00.000Z"),
+  });
+  const bestIps = JSON.parse(payload.BEST_IPS);
+  const status = JSON.parse(payload.STATUS);
+
+  // 高带宽节点应排在前面
+  assert.deepEqual(bestIps.map((item) => item.address), ["141.147.162.204", "130.61.203.115"]);
+  assert.equal(bestIps[0].speed, 11.59);
+  assert.equal(bestIps[1].speed, 5.0);
+  assert.equal(status.averageSpeed, 8); // (11.59 + 5.0) / 2 ≈ 8.3 → 8
 });
 
 test("build update payload keeps previous nodes when new result is too small", async () => {

@@ -117,7 +117,7 @@ export async function checkCandidates(candidates, ports, { checkOne = checkEdge,
   for (const candidate of candidates) {
     const candidatePorts = candidate.port ? [candidate.port] : ports;
     for (const port of candidatePorts) {
-      tasks.push({ address: candidate.address, port, source: candidate.source || "unknown" });
+      tasks.push({ address: candidate.address, port, source: candidate.source || "unknown", speed: candidate.speed ?? null });
     }
   }
 
@@ -137,5 +137,17 @@ export async function checkCandidates(candidates, ports, { checkOne = checkEdge,
   }
 
   await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, worker));
-  return results.sort((a, b) => a.latency - b.latency);
+  return results.sort((a, b) => {
+    // 优先按带宽(speed)降序：有带宽数据的排前面，带宽高的优先
+    // 无 speed 的回退按延迟升序，保持对 text/json 源的兼容
+    const aSpeed = a.speed == null ? null : (Number.isFinite(Number(a.speed)) ? Number(a.speed) : null);
+    const bSpeed = b.speed == null ? null : (Number.isFinite(Number(b.speed)) ? Number(b.speed) : null);
+    if (aSpeed !== null || bSpeed !== null) {
+      if (aSpeed === null) return 1;   // 无带宽的排后面
+      if (bSpeed === null) return -1;  // 有带宽的排前面
+      if (aSpeed !== bSpeed) return bSpeed - aSpeed;  // 带宽高的优先
+    }
+    // 都无带宽或带宽相同时，按延迟升序
+    return a.latency - b.latency;
+  });
 }

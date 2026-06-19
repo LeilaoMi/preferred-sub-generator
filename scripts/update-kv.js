@@ -50,6 +50,12 @@ function averageLatency(items) {
   return Math.round(values.reduce((sum, value) => sum + value, 0) / values.length);
 }
 
+function averageSpeed(items) {
+  const values = items.map((item) => item.speed).filter((value) => value != null && Number.isFinite(Number(value)));
+  if (values.length === 0) return null;
+  return Math.round(values.reduce((sum, value) => sum + Number(value), 0) / values.length);
+}
+
 function buildVersionKey(now) {
   return `BEST_IPS_${now.toISOString().replace(/[-:.]/g, "").slice(0, 15)}Z`;
 }
@@ -102,6 +108,7 @@ export async function buildUpdatePayload({
     port: item.port,
     name: edgeName(item, index),
     latency: item.latency,
+    speed: item.speed == null ? null : (Number.isFinite(Number(item.speed)) ? Number(item.speed) : null),
     colo: item.colo,
     edgeVerified: item.edgeVerified,
     source: item.source,
@@ -125,6 +132,8 @@ export async function buildUpdatePayload({
     checked: checked.length,
     averageLatency: averageLatency(bestIps),
     averageLatencyNewScan: averageLatency(nextBestIps),
+    averageSpeed: averageSpeed(bestIps),
+    averageSpeedNewScan: averageSpeed(nextBestIps),
     minAvailableToOverwrite: MIN_AVAILABLE_TO_OVERWRITE,
     protectedByPrevious,
     lastError: protectedByPrevious ? `本次可用节点少于 ${MIN_AVAILABLE_TO_OVERWRITE}，已保留上次可用结果` : null,
