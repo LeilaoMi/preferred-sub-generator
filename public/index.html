@@ -231,6 +231,10 @@
             <div class="label">更新时间</div>
             <div class="value" id="updatedAt" style="font-size: 16px; color: var(--text);">读取中</div>
           </div>
+          <div class="metric">
+            <div class="label">测速地点</div>
+            <div class="value" id="speedtestLocation" style="font-size: 16px; color: var(--text);">读取中</div>
+          </div>
         </div>
       </aside>
     </section>
@@ -393,6 +397,7 @@
         document.getElementById("available").textContent = status.available ?? 0;
         document.getElementById("sourceCount").textContent = status.sourceCount ?? 0;
         document.getElementById("updatedAt").textContent = formatTime(status.updatedAt);
+        document.getElementById("speedtestLocation").textContent = status.speedtestLocation || "未知";
       })
       .catch(() => {
         document.getElementById("updatedAt").textContent = "状态读取失败";

@@ -130,6 +130,8 @@ export async function buildUpdatePayload({
     requireCfRay,
     allowTcpOnly,
     checked: checked.length,
+    speedtestLocation: "GitHub Actions (US)",
+    speedtestLocationNote: "colo/latency/speed 均为美国机房测速结果，国内实际接入节点地区以本地为准（CF Anycast 就近分配）",
     averageLatency: averageLatency(bestIps),
     averageLatencyNewScan: averageLatency(nextBestIps),
     averageSpeed: averageSpeed(bestIps),
