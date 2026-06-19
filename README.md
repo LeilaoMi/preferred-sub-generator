@@ -635,6 +635,16 @@ GitHub Secret 虽然不是公开文本，但没有必要让 GitHub Actions 持�
 
 测速在 GitHub Actions（美国）跑，候选来自 CF 官方 IP 段和社区源，Anycast 导致从美国探测到的多是美国节点；GitHub Actions 无法对 CF 边缘 IP 做带宽下载测速（speed.cloudflare.com 在 GHA 环境测速结果不代表国内），所以 averageSpeed 显示 None。要反映国内真实速度，请用首页「开始测速」按钮在本地浏览器测，结果会回传到 /api/speedtest-feedback。
 
+### 为什么 IP 在 cleanip.io / AbuseIPDB 上显示 abuse？X/TikTok 等验证过不了？
+
+这是 Cloudflare Worker 架构的固有限制，不是优选 IP 没选好，也不是本项目配置错误。
+
+原因：你连的 CF 边缘 IP（入口）和访问目标网站时 CF 对外的出口 IP 不是同一个。CF 内部按负载动态分配出口 IP，你无法选择或固定它。而 CF 的出口段长期被大量代理用户共用，已被 AbuseIPDB、Spamhaus 等 RBL 大量标记为 abuse。所以即使你优选到一个干净的边缘 IP（AbuseIPDB 分数 0），访问 X、TikTok 等做 IP 信誉验证的服务时，落到的还是被标脏的出口段，验证会报错或拒绝。
+
+本项目只优化「入口」（CF 边缘 IP 的延迟/带宽），无法优化「出口」（CF 对外访问目标网站的 IP）。出口不可控是 CF Worker 的架构特性，任何基于 CF Worker 的 VLESS 方案都有同样问题，换源、换优选 IP 都解决不了。
+
+解决方向：需要自有 VPS 或中转服务作为可控出口（架构变为 `你 → CF边缘 → CF Worker → 你的VPS → 目标网站`），由 VPS 的 IP 访问目标网站，信誉你自己维护。本项目明确不做中转、不引入 ProxyIP/SOCKS5/NAT64，如果你主要场景是过 X/TikTok 等验证类应用，建议直接用自有 VPS 或商业机场，比继续调 CF 优选更有效。
+
 ### COLO 不认识怎么办？
 
 未知 COLO 会显示为：
