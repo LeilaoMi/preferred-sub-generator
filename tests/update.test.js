@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { checkCandidates, parseCfRayColo } from "../scripts/lib/check.js";
-import { collectCandidates, collectCandidatesWithHealth, expandIPv4Cidr, parseCandidate, uniqueCandidates } from "../scripts/lib/candidates.js";
+import { collectCandidates, collectCandidatesWithHealth, expandIPv4Cidr, expandIPv6Cidr, parseCandidate, uniqueCandidates } from "../scripts/lib/candidates.js";
 import { deleteKvValue, readKvValue, writeKvValue } from "../scripts/lib/kv.js";
 import { buildUpdatePayload } from "../scripts/update-kv.js";
 
@@ -20,6 +20,19 @@ test("expand IPv4 CIDR into sampled edge candidates", () => {
   assert.deepEqual(result, [
     { address: "1.1.1.1", port: null },
     { address: "1.1.1.2", port: null },
+  ]);
+});
+
+test("expand IPv4 CIDR into sampled edge candidates with more samples", () => {
+  const result = expandIPv4Cidr("1.1.1.0/28", 6);
+
+  assert.deepEqual(result, [
+    { address: "1.1.1.1", port: null },
+    { address: "1.1.1.3", port: null },
+    { address: "1.1.1.6", port: null },
+    { address: "1.1.1.8", port: null },
+    { address: "1.1.1.11", port: null },
+    { address: "1.1.1.14", port: null },
   ]);
 });
 
@@ -46,6 +59,19 @@ test("collect candidates from manual and remote sources", async () => {
     "2.2.2.2:",
     "node.example:8443",
   ]);
+});
+
+test("collect candidates expands IPv6 CIDR from Cloudflare official source", async () => {
+  const result = await collectCandidates({
+    manualText: "",
+    remoteSources: [{ name: "cloudflare-official-v6", url: "https://www.cloudflare.com/ips-v6/", type: "text", cidrSamples: 2 }],
+    fetchImpl: async () => new Response("2400:cb00::/32\n2606:4700::/32"),
+  });
+
+  assert.equal(result.length, 4);
+  assert.ok(result.every((item) => item.address.includes(":")));
+  assert.ok(result.every((item) => item.port === null));
+  assert.deepEqual(result.map((item) => item.source), ["cloudflare-official-v6", "cloudflare-official-v6", "cloudflare-official-v6", "cloudflare-official-v6"]);
 });
 
 test("collect candidates from CloudflareSpeedTest CSV source", async () => {

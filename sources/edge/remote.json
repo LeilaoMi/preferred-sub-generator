@@ -6,24 +6,8 @@
     "cidrSamples": 4
   },
   {
-    "name": "cmliu-addresses-api",
-    "url": "https://raw.githubusercontent.com/cmliu/WorkerVless2sub/main/addressesapi.txt",
-    "type": "text"
-  },
-  {
-    "name": "cmliu-addresses-ipv6-api",
-    "url": "https://raw.githubusercontent.com/cmliu/WorkerVless2sub/main/addressesipv6api.txt",
-    "type": "text"
-  },
-  {
-    "name": "cmliu-addresses-csv",
-    "url": "https://raw.githubusercontent.com/cmliu/WorkerVless2sub/main/addressescsv.csv",
-    "type": "csv",
-    "minSpeed": 8
-  },
-  {
-    "name": "amclubs-ipv4",
-    "url": "https://raw.githubusercontent.com/amclubs/am-cf-tunnel/main/example/ipv4.txt",
+    "name": "cloudflare-official-v6",
+    "url": "https://www.cloudflare.com/ips-v6/",
     "type": "text",
     "cidrSamples": 4
   }
