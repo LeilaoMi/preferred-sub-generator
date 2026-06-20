@@ -64,11 +64,89 @@ export function expandIPv4Cidr(value, maxSamples = 4) {
   });
 }
 
+function groupsToBigInt(groups) {
+  if (groups.length !== 8) return null;
+  let result = 0n;
+  for (const group of groups) {
+    const num = parseInt(group || "0", 16);
+    if (!Number.isFinite(num) || num < 0 || num > 0xffff) return null;
+    result = (result << 16n) | BigInt(num);
+  }
+  return result;
+}
+
+function ipv6ToBigInt(value) {
+  const normalized = normalizeAddress(value);
+  if (normalized.includes("::")) {
+    const [head, tail] = normalized.split("::");
+    const headGroups = head ? head.split(":") : [];
+    const tailGroups = tail ? tail.split(":") : [];
+    const fill = 8 - headGroups.length - tailGroups.length;
+    if (fill < 1) return null;
+    return groupsToBigInt([...headGroups, ...Array(fill).fill("0"), ...tailGroups]);
+  }
+  return groupsToBigInt(normalized.split(":"));
+}
+
+function compressIpv6(groups) {
+  let bestStart = -1;
+  let bestLen = 0;
+  let runStart = -1;
+  for (let i = 0; i < groups.length; i += 1) {
+    if (groups[i] === "0") {
+      if (runStart < 0) runStart = i;
+      const runLen = i - runStart + 1;
+      if (runLen > bestLen) { bestLen = runLen; bestStart = runStart; }
+    } else {
+      runStart = -1;
+    }
+  }
+  if (bestLen < 2) return groups.join(":");
+  const before = groups.slice(0, bestStart).join(":");
+  const after = groups.slice(bestStart + bestLen).join(":");
+  return `${before}::${after}`;
+}
+
+function bigIntToIpv6(value) {
+  const groups = [];
+  let v = value;
+  for (let i = 0; i < 8; i += 1) {
+    groups.unshift((v & 0xffffn).toString(16));
+    v >>= 16n;
+  }
+  return compressIpv6(groups);
+}
+
+export function expandIPv6Cidr(value, maxSamples = 4) {
+  const match = String(value).match(/^([0-9a-fA-F:]+)\/(\d{1,3})$/);
+  if (!match) return [];
+  const base = ipv6ToBigInt(match[1]);
+  const prefix = Number(match[2]);
+  if (base === null || prefix < 0 || prefix > 128) return [];
+  const size = 1n << BigInt(128 - prefix);
+  const first = prefix >= 127 ? base : base + 1n;
+  const last = prefix >= 127 ? base + size - 1n : base + size - 2n;
+  if (last < first) return [];
+  const count = BigInt(Math.min(maxSamples, Number(last - first + 1n)));
+  if (count === 1n) return [{ address: bigIntToIpv6(first), port: null }];
+  return Array.from({ length: Number(count) }, (_, index) => {
+    const offset = ((last - first) * BigInt(index)) / (count - 1n);
+    return { address: bigIntToIpv6(first + offset), port: null };
+  });
+}
+
+// 统一 CIDR 展开：先试 IPv4，不匹配再试 IPv6
+export function expandCidr(value, maxSamples = 4) {
+  const v4 = expandIPv4Cidr(value, maxSamples);
+  if (v4.length > 0) return v4;
+  return expandIPv6Cidr(value, maxSamples);
+}
+
 export function parseCandidate(value) {
   const line = stripComment(String(value || ""));
   if (!line) return null;
 
-  const cidr = expandIPv4Cidr(line, 1);
+  const cidr = expandCidr(line, 1);
   if (cidr.length > 0) return cidr[0];
 
   const fromUrl = parseUrlCandidate(line);
@@ -97,16 +175,19 @@ export function parseCandidate(value) {
 
 function parseText(text, source, maxCidrSamples = DEFAULT_CIDR_SAMPLES) {
   const candidates = [];
-  for (const raw of String(text || "").split(/\r?\n|,|\s+/)) {
-    const line = stripComment(raw);
+  for (const raw of String(text || "").split(/\r?\n/)) {
+    const line = stripComment(raw).trim();
     if (!line) continue;
-    const cidr = expandIPv4Cidr(line, maxCidrSamples);
-    if (cidr.length > 0) {
-      candidates.push(...cidr.map((candidate) => ({ ...candidate, source })));
-      continue;
+    for (const token of line.split(/[\s,]+/)) {
+      if (!token) continue;
+      const cidr = expandCidr(token, maxCidrSamples);
+      if (cidr.length > 0) {
+        candidates.push(...cidr.map((candidate) => ({ ...candidate, source })));
+        continue;
+      }
+      const candidate = parseCandidate(token);
+      if (candidate) candidates.push({ ...candidate, source });
     }
-    const candidate = parseCandidate(line);
-    if (candidate) candidates.push({ ...candidate, source });
   }
   return candidates;
 }
@@ -143,7 +224,7 @@ function parseJson(value, source, maxCidrSamples = DEFAULT_CIDR_SAMPLES) {
   return items
     .flatMap((item) => {
       if (typeof item === "string") {
-        const cidr = expandIPv4Cidr(item, maxCidrSamples);
+        const cidr = expandCidr(item, maxCidrSamples);
         return cidr.length > 0 ? cidr : [parseCandidate(item)].filter(Boolean);
       }
       if (item?.address || item?.host || item?.ip) {
