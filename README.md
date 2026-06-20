@@ -10,13 +10,11 @@
 
 - 支持粘贴 `vless://` 原始节点，解析并保存为私用模板。
 - 自动识别并保留：UUID、端口、TLS、WS、Host、SNI、path、节点备注等参数。
-- 自动聚合 Cloudflare Edge 候选源：
-  - Cloudflare 官方 IPv4 CIDR。
-  - cmliu `addressesapi.txt`。
-  - cmliu `addressesipv6api.txt`。
-  - cmliu `addressescsv.csv`，支持速度阈值过滤。
-  - amclubs `ipv4.txt`。
+- 自动聚合 Cloudflare Edge 候选源（当前默认只保留 Cloudflare 官方源，避免第三方源混入中转 IP）：
+  - Cloudflare 官方 IPv4 CIDR（`https://www.cloudflare.com/ips-v4/`）。
+  - Cloudflare 官方 IPv6 CIDR（`https://www.cloudflare.com/ips-v6/`），支持 IPv6 边缘 IP 优选。
   - 本地手动源 `sources/edge/manual.txt`。
+  - 可按需在 `sources/edge/remote.json` 自行添加 cmliu/amclubs 等社区源（注意区分 CF 边缘 IP 与中转 IP）。
 - 自动检测候选 IP 的可达性、延迟和 Cloudflare COLO。
 - 排序策略：**优先按带宽（speed）降序**，带宽数据来自 CSV 源的下载速度；无带宽数据的候选回退按延迟升序。国内访问场景下带宽比延迟更能反映实际体验。
 - 提供浏览器本地测速反馈面板：首页「开始测速」按钮在用户浏览器本地通过 Cloudflare 官方端点 `speed.cloudflare.com/__down` 实测下载速度，结果回传 `/api/speedtest-feedback` 存入 KV，可用于验证国内真实访问质量。
@@ -536,15 +534,14 @@ example.com:443
 sources/edge/remote.json
 ```
 
-当前默认包含：
+当前默认只保留 Cloudflare 官方源：
 
 ```text
-Cloudflare 官方 IPv4 CIDR
-cmliu addressesapi.txt
-cmliu addressesipv6api.txt
-cmliu addressescsv.csv
-amclubs ipv4.txt
+Cloudflare 官方 IPv4 CIDR（ips-v4）
+Cloudflare 官方 IPv6 CIDR（ips-v6）
 ```
+
+> 历史上接入过 cmliu `addressesapi.txt`、`addressesipv6api.txt`、`addressescsv.csv` 和 amclubs `ipv4.txt`。实测发现部分社区源会混入 Oracle Cloud 等非 CF 边缘中转 IP，污染优选结果，已默认移除。如确认某源是纯 CF 边缘 IP，可自行加回 `remote.json`。
 
 CSV 源支持：
 
@@ -584,6 +581,8 @@ npm run preflight
 - Sing-box 输出
 - Shadowrocket 输出
 - CloudflareSpeedTest CSV 源解析
+- IPv6 CIDR 展开与 IPv6 地址/端口解析
+- 候选源端到端（含 CF 官方 IPv6 源）
 - COLO 中文节点名
 - 访问控制
 - 部署前检查
@@ -644,6 +643,10 @@ GitHub Secret 虽然不是公开文本，但没有必要让 GitHub Actions 持�
 本项目只优化「入口」（CF 边缘 IP 的延迟/带宽），无法优化「出口」（CF 对外访问目标网站的 IP）。出口不可控是 CF Worker 的架构特性，任何基于 CF Worker 的 VLESS 方案都有同样问题，换源、换优选 IP 都解决不了。
 
 解决方向：需要自有 VPS 或中转服务作为可控出口（架构变为 `你 → CF边缘 → CF Worker → 你的VPS → 目标网站`），由 VPS 的 IP 访问目标网站，信誉你自己维护。本项目明确不做中转、不引入 ProxyIP/SOCKS5/NAT64，如果你主要场景是过 X/TikTok 等验证类应用，建议直接用自有 VPS 或商业机场，比继续调 CF 优选更有效。
+
+### 为什么 IPv6 节点可能测不到 / 进不了 BEST_IPS？
+
+GitHub Actions 的运行机和很多 VPS 默认没有 IPv6 出口，无法连通 CF IPv6 边缘 IP，所以测速阶段 IPv6 候选会全部失败、进不了 `BEST_IPS`。这是测速环境限制，不是项目不支持 IPv6——`parseText`/`expandIPv6Cidr`/`checkEdge`/VLESS 生成都已完整支持 IPv6。如果你的测速环境有 IPv6 出口，IPv6 候选会正常参与优选。
 
 ### COLO 不认识怎么办？
 
