@@ -200,6 +200,12 @@
           </div>
         </div>
 
+        <div style="margin-top: 12px;">
+          <label for="coloFilter">线路过滤（COLO）</label>
+          <input id="coloFilter" type="text" placeholder="留空不过滤；auto = 你的接入点，或 HKG,NRT,LAX">
+          <p class="hint">填写后订阅只保留该线路节点；无匹配时自动回退全量，订阅不会变空。</p>
+        </div>
+
         <div class="actions">
           <p class="hint">提示：点击“保存并生成”会把当前 VLESS 节点保存为模板；“仅显示订阅”不会修改模板。订阅链接默认需要只读 token，公开模式必须显式开启。</p>
           <div class="button-row">
@@ -234,6 +240,14 @@
           <div class="metric">
             <div class="label">测速地点</div>
             <div class="value" id="speedtestLocation" style="font-size: 16px; color: var(--text);">读取中</div>
+          </div>
+          <div class="metric">
+            <div class="label">你的接入点</div>
+            <div class="value" id="userColo" style="font-size: 16px; color: var(--text);">测量中</div>
+          </div>
+          <div class="metric">
+            <div class="label">你的延迟</div>
+            <div class="value" id="userRtt" style="font-size: 16px; color: var(--text);">测量中</div>
           </div>
         </div>
         <div style="margin-top: 18px; padding: 16px; border: 1px solid var(--border); border-radius: 18px; background: rgba(2, 6, 23, 0.38);">
@@ -270,6 +284,7 @@
     const adminTokenInput = document.getElementById("adminToken");
     const nodeLinkInput = document.getElementById("nodeLink");
     const formatSelect = document.getElementById("format");
+    const coloInput = document.getElementById("coloFilter");
     const subscriptionList = document.getElementById("subscriptionList");
     const result = document.getElementById("result");
     const resultHint = document.getElementById("resultHint");
@@ -290,6 +305,8 @@
     function buildUrl(path) {
       const url = new URL(path, location.origin);
       if (readToken) url.searchParams.set("t", readToken);
+      const colo = coloInput.value.trim();
+      if (colo) url.searchParams.set("colo", colo);
       return url.toString();
     }
 
@@ -416,6 +433,7 @@
     });
 
     formatSelect.addEventListener("change", renderSubscriptions);
+    coloInput.addEventListener("input", renderSubscriptions);
     loadReadToken();
     subscriptionList.addEventListener("click", async (event) => {
       const button = event.target.closest("button[data-copy]");
@@ -437,6 +455,31 @@
       .catch(() => {
         document.getElementById("updatedAt").textContent = "状态读取失败";
       });
+
+    async function loadEdgeInfo() {
+      const coloCell = document.getElementById("userColo");
+      const rttCell = document.getElementById("userRtt");
+      const samples = [];
+      let colo = "";
+      let region = "";
+      try {
+        for (let i = 0; i < 3; i += 1) {
+          const started = performance.now();
+          const text = await (await fetch(`/cdn-cgi/trace?cb=${Date.now()}-${i}`, { cache: "no-store" })).text();
+          samples.push(performance.now() - started);
+          if (!colo) {
+            colo = (text.match(/colo=(\w+)/) || [])[1] || "";
+            region = (text.match(/loc=(\w+)/) || [])[1] || "";
+          }
+        }
+        coloCell.textContent = colo ? `${colo} · ${region}` : "未知";
+        rttCell.textContent = `${Math.round(Math.min(...samples))}ms`;
+      } catch {
+        coloCell.textContent = "测量失败";
+        rttCell.textContent = "测量失败";
+      }
+    }
+    loadEdgeInfo();
 
     const speedtestResult = document.getElementById("speedtestResult");
     const runSpeedtestButton = document.getElementById("runSpeedtest");

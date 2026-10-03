@@ -55,6 +55,18 @@ test("admin page is Chinese and uses admin token for api/template", async () => 
   assert.doesNotMatch(html, /secret-token/);
 });
 
+test("homepage exposes colo filter input and local edge rtt metrics", async () => {
+  const html = await fs.readFile(new URL("../public/index.html", import.meta.url), "utf8");
+
+  assert.match(html, /id="coloFilter"/);
+  assert.match(html, /searchParams\.set\("colo", colo\)/);
+  assert.match(html, /coloInput\.addEventListener\("input", renderSubscriptions\)/);
+  assert.match(html, /id="userColo"/);
+  assert.match(html, /id="userRtt"/);
+  assert.match(html, /cdn-cgi\/trace\?cb=/);
+  assert.match(html, /Math\.min\(\.\.\.samples\)/);
+});
+
 test("wrangler config declares Pages output and SUB_KV binding", async () => {
   const toml = await fs.readFile(new URL("../wrangler.toml", import.meta.url), "utf8");
 
