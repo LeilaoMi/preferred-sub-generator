@@ -1,5 +1,7 @@
 # Preferred Sub Generator
 
+[![CI](https://github.com/LeilaoMi/preferred-sub-generator/actions/workflows/ci.yml/badge.svg)](https://github.com/LeilaoMi/preferred-sub-generator/actions/workflows/ci.yml)
+
 单用户私用的 Cloudflare Edge 优选订阅生成器。
 
 它的核心目标很简单：**保留你的原始 VLESS 节点参数，只把入口地址替换成测速后的 Cloudflare 高速边缘 IP，然后生成适合不同客户端导入的订阅。**
@@ -17,7 +19,7 @@
   - 可按需在 `sources/edge/remote.json` 自行添加 cmliu/amclubs 等社区源（注意区分 CF 边缘 IP 与中转 IP）。
 - 自动检测候选 IP 的可达性、延迟和 Cloudflare COLO。
 - 排序策略：**优先按带宽（speed）降序**，带宽数据来自 CSV 源的下载速度；无带宽数据的候选回退按延迟升序。国内访问场景下带宽比延迟更能反映实际体验。
-- 提供浏览器本地测速反馈面板：首页「开始测速」按钮在用户浏览器本地通过 Cloudflare 官方端点 `speed.cloudflare.com/__down` 实测下载速度，结果回传 `/api/speedtest-feedback` 存入 KV，可用于验证国内真实访问质量。
+- 提供浏览器本地测速反馈面板：首页「开始测速」按钮在用户浏览器本地通过 Cloudflare 官方端点 `speed.cloudflare.com/__down` 实测下载速度，结果回传 `/api/speedtest-feedback` 存入 D1（未绑定时回退 KV），可用于验证国内真实访问质量；`/admin.html` 提供按天趋势面板。
 - `/status` 会标注测速地点（`speedtestLocation`，当前为 `GitHub Actions (US)`）和平均带宽（`averageSpeed`），让你清楚知道候选 IP 的延迟是在哪测的。
 - 订阅节点名称支持中文友好 COLO 展示，例如：
 
@@ -86,11 +88,11 @@ Cloudflare Pages 是推荐部署方式，也是当前仓库实际验证的部署
 当前仓库已按 Cloudflare Pages 方式部署并验证。
 
 ```text
-生产自定义域名：https://yxdy.woniu.bee.al
-Pages 项目名：preferred-sub-generator-zrd
-最近验证预览：https://3b090ee2.preferred-sub-generator-zrd.pages.dev
+生产自定义域名：https://your-domain.example.com
+Pages 项目名：your-pages-project
+最近验证预览：https://<deployment>.your-pages-project.pages.dev
 KV 绑定变量：SUB_KV
-KV Namespace ID：9c1be2549489489ca8c55c5886b56b3d
+KV Namespace ID：见 wrangler.toml（公开仓库文档不记录真实 ID）
 ```
 
 当前线上关键行为：
@@ -98,14 +100,14 @@ KV Namespace ID：9c1be2549489489ca8c55c5886b56b3d
 ```text
 /status                         公开状态接口，HTTP 200，含 speedtestLocation / averageSpeed
 /health                         公开最小健康检查，HTTP 200
-/api/read-token                 返回是否配置 SUB_READ_TOKEN，HTTP 200
-/api/speedtest-feedback         POST 公开回传浏览器本地测速结果（colo/speed）；GET 需管理 token 查看汇总
+/api/read-token                 匿名只返回是否配置 SUB_READ_TOKEN；带管理 token Bearer 才返回只读 token 值，HTTP 200
+/api/speedtest-feedback         POST 公开回传浏览器本地测速结果（colo/speed）；GET 需管理 token 查看汇总与按天趋势
 /sub?type=v2rayng&t=只读token   返回 v2rayNG base64 订阅，HTTP 200
 /best?n=2&t=只读token           返回优选 IP JSON，HTTP 200
 /sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000  edgetunnel 探测旁路，免 token 返回占位 base64 订阅（UA 需含 edgetunnel）
 ```
 
-真实 token 只保存在 Cloudflare Pages 环境变量中，仓库不保存、不展示。首页会在浏览器中请求 `/api/read-token`，读取线上 `SUB_READ_TOKEN` 后自动把 `t=只读token` 拼进订阅链接；管理 token `SUB_TOKEN` 不会进入订阅 URL。
+真实 token 只保存在 Cloudflare Pages 环境变量中，仓库不保存、不展示。首页在浏览器中请求 `/api/read-token` 时必须带上管理 token 才能换到 `SUB_READ_TOKEN`，换到后自动把 `t=只读token` 拼进订阅链接并存入 localStorage；匿名请求只能得到 `configured` 标记，拿不到 token 值。管理 token `SUB_TOKEN` 不会进入订阅 URL。
 
 ### 可配合 GitHub Actions
 
@@ -136,7 +138,7 @@ functions/best.js                优选 IP 列表接口
 functions/versions.js            优选 IP 版本索引接口
 functions/status.js              公开状态接口
 functions/health.js              健康检查接口
-functions/api/read-token.js      读取 Pages 环境变量 SUB_READ_TOKEN，用于首页自动拼订阅 URL
+functions/api/read-token.js      用管理 token 换取 SUB_READ_TOKEN，用于首页自动拼订阅 URL
 functions/api/template.js        模板读取/保存接口
 functions/api/speedtest-feedback.js  浏览器本地测速结果回传与汇总
 src/parser/vless.js              VLESS 解析
@@ -145,12 +147,14 @@ src/generator/clash.js           Clash/Mihomo 输出
 src/generator/singbox.js         Sing-box 输出
 src/generator/shadowrocket.js    Shadowrocket 输出
 src/utils/colo.js                COLO 中文命名
-src/api/speedtest-feedback.js    测速反馈接收、KV 存储与汇总
+src/api/speedtest-feedback.js    测速反馈接收与汇总
+src/api/speedtest-db.js          测速反馈存储抽象（D1 优先，KV 回退）与按天聚合
 scripts/update-kv.js             聚合、检测并写入 KV
 scripts/lib/candidates.js        候选源解析
 scripts/lib/check.js             TCP/HTTP Edge 检测
 docs/cloudflare-setup.md         Cloudflare 设置说明
 docs/deploy-checklist.md         部署前检查清单
+docs/d1-setup.md                 D1 测速数据存储与趋势面板绑定说明
 docs/source-research.md          同类项目和 IP 源调研
 sources/edge/manual.txt          手动 CF Edge 候选源
 sources/edge/remote.json         远程 CF Edge 候选源
@@ -172,7 +176,7 @@ BEST_IPS_TREND     最近 7 次刷新趋势
 STATUS     更新时间、可用数量、检测状态、连续 fallback、最近成功刷新时间
 SOURCE_HEALTH      最近一次候选源抓取健康报告，含每源状态、候选数、错误和耗时
 TEMPLATE_AUDIT     最近一次模板更新审计信息
-SPEED_FEEDBACK     浏览器本地测速反馈记录，最多保留 100 条，由 /api/speedtest-feedback 写入
+SPEED_FEEDBACK     浏览器本地测速反馈记录（D1 未绑定时的回退存储），最多保留 500 条，由 /api/speedtest-feedback 写入
 LAST_RUN_*       最近一次 GitHub Actions 自动刷新结果
 ```
 
@@ -189,7 +193,7 @@ id = "你的 KV Namespace ID"
 建议配置：
 
 ```text
-项目名：preferred-sub-generator-zrd
+项目名：your-pages-project
 构建命令：留空
 构建输出目录：public
 Functions 目录：functions
@@ -215,7 +219,7 @@ SUB_READ_TOKEN   只读 token，用于 /sub 和 /best
 可选环境变量：
 
 ```text
-SUB_READ_TOKEN             只读 token，用于 /sub、/best、/versions；上线后首页会从 /api/read-token 读取它并自动拼到订阅 URL
+SUB_READ_TOKEN             只读 token，用于 /sub、/best、/versions；上线后首页用管理 token 从 /api/read-token 换取它并自动拼到订阅 URL
 SUB_READ_TOKEN_NEXT        只读 token 轮换期间的新 token
 SUB_PUBLIC=1              显式恢复公开 /sub 和 /best 的旧行为，不推荐
 ALLOW_QUERY_TOKEN=1       临时允许 /api/template?token=，默认关闭
@@ -225,7 +229,7 @@ ALLOW_TCP_ONLY=1          兼容 TCP 可达但无 cf-ray 的结果，默认关�
 VERSION_RETENTION=30      BEST_IPS_* 版本快照保留数量，默认 30
 ```
 
-订阅接口 `/sub`、`/best` 和 `/versions` 默认需要只读 token；管理接口 `/api/template` 需要 `SUB_TOKEN`。管理接口默认只接受 `Authorization: Bearer <SUB_TOKEN>`，不要把管理 token 拼进 URL。首页上线后会通过 `/api/read-token` 读取 Cloudflare Pages 环境变量 `SUB_READ_TOKEN`，并只把这个只读 token 自动拼进订阅链接。
+订阅接口 `/sub`、`/best` 和 `/versions` 默认需要只读 token；管理接口 `/api/template` 需要 `SUB_TOKEN`。管理接口默认只接受 `Authorization: Bearer <SUB_TOKEN>`，不要把管理 token 拼进 URL。首页上线后会通过 `/api/read-token`（需管理 token）换取 Cloudflare Pages 环境变量 `SUB_READ_TOKEN`，并只把这个只读 token 自动拼进订阅链接。
 
 ## 部署到 Cloudflare Pages
 
@@ -236,7 +240,7 @@ VERSION_RETENTION=30      BEST_IPS_* 版本快照保留数量，默认 30
 ```bash
 npm test
 npm run preflight
-npx wrangler pages deploy public --project-name preferred-sub-generator-zrd --branch main --commit-dirty=true
+npx wrangler pages deploy public --project-name your-pages-project --branch main --commit-dirty=true
 ```
 
 如果需要指定账号和 token：
@@ -244,7 +248,7 @@ npx wrangler pages deploy public --project-name preferred-sub-generator-zrd --br
 ```bash
 CLOUDFLARE_ACCOUNT_ID=你的账号ID \
 CLOUDFLARE_API_TOKEN=你的API_TOKEN \
-npx wrangler pages deploy public --project-name preferred-sub-generator-zrd --branch main --commit-dirty=true
+npx wrangler pages deploy public --project-name your-pages-project --branch main --commit-dirty=true
 ```
 
 ### 方式 B：Cloudflare Dashboard 连接 GitHub
@@ -291,6 +295,17 @@ SUB_TOKEN   管理 token，用于保存/读取原始 VLESS 模板
 CLOUDFLARE_API_TOKEN_2    用于 GitHub Actions 写 KV 的 Cloudflare API Token（当前账号）
 CLOUDFLARE_ACCOUNT_ID     Cloudflare 账号 ID
 CLOUDFLARE_NAMESPACE_ID   SUB_KV 的 Namespace ID
+UPDATE_WEBHOOK_URL        可选，告警 Webhook（Telegram/Slack/企业微信机器人等）
+```
+
+可选配置 Actions Variables（阈值调优）：
+
+```text
+UPDATE_WEBHOOK_ALWAYS     1 = 每次刷新都推送 webhook（旧行为），默认关闭
+ALERT_REPEAT_HOURS        同一告警重复提醒间隔，默认 24 小时
+ALERT_FALLBACK_THRESHOLD  连续 fallback 触发 warn 的次数，默认 3
+ALERT_MIN_AVAILABLE       可用节点低于该值触发 warn，默认 10
+ALERT_DROP_RATIO          可用数相比上次下降比例阈值，默认 0.3
 ```
 
 不需要配置原始 VLESS 节点。真实节点通过网页输入并保存到 KV 的 `TEMPLATE`。
@@ -307,7 +322,9 @@ Actions 运行逻辑：
   ↓
 清理超出保留上限的 BEST_IPS_* 版本快照
   ↓
-可选 webhook 通知；通知失败只记录 warning，不阻断 KV 更新
+告警评估：可用数归零/骤降、连续 fallback 超阈值、刷新失败时才推送 webhook；
+状态未变化则静默，同一告警按 ALERT_REPEAT_HOURS 重复提醒，恢复时推送 recovery；
+通知失败只记录 warning，不阻断 KV 更新
 ```
 
 如果还没有通过网页保存过模板，Actions 会提示缺少 `TEMPLATE`。
@@ -362,7 +379,7 @@ cmliu 版 edgetunnel 用 `sub://` 协议对接外部"优选订阅生成器"。�
 - 在 edgetunnel 的"优选订阅地址"里直接填：
 
 ```text
-sub://yxdy.woniu.bee.al
+sub://your-domain.example.com
 ```
 
 - 不要加 `?t=` 或 `?type=`，加了也会被丢弃且无意义。
@@ -431,13 +448,13 @@ GET /versions?n=10
 
 需要只读 token，返回最近 `BEST_IPS_*` 版本索引，不直接返回节点详情。可配合 `/best?version=...` 做回滚和诊断。
 
-### 读取只读订阅 token
+### 换取只读订阅 token
 
 ```text
 GET /api/read-token
 ```
 
-公开接口，只返回 Cloudflare Pages 是否配置了 `SUB_READ_TOKEN` 以及该只读 token 的值，用于首页自动生成可直接导入客户端的订阅 URL。这个接口不会返回管理 token `SUB_TOKEN`。
+需要管理 token（`Authorization: Bearer <SUB_TOKEN>`）才会返回只读 token 的值；匿名请求只返回 `{ configured }`，不会泄露 `SUB_READ_TOKEN`。用于首页换取只读 token 后自动生成可直接导入客户端的订阅 URL。换取到的只读 token 只存在浏览器 localStorage，不会返回管理 token `SUB_TOKEN`。
 
 ### 测速反馈
 
@@ -446,16 +463,18 @@ POST /api/speedtest-feedback
 GET  /api/speedtest-feedback
 ```
 
-`POST` 公开接口，接收浏览器本地测速结果：用 Cloudflare 官方端点 `speed.cloudflare.com/__down?bytes=10000000` 在用户浏览器本地实测下载速度，附带 `/cdn-cgi/trace` 拿到的 COLO 和 ISP，回传后端存入 KV 的 `SPEED_FEEDBACK`（最多 100 条）。带基础频率限制。
+`POST` 公开接口，接收浏览器本地测速结果：用 Cloudflare 官方端点 `speed.cloudflare.com/__down?bytes=10000000` 在用户浏览器本地实测下载速度，附带 `/cdn-cgi/trace` 拿到的 COLO 和 ISP，回传后端存入 D1 的 `speed_feedback` 表（未绑定 `SPEED_DB` 时回退 KV 的 `SPEED_FEEDBACK`，最多 500 条）。原始 IP 不落库，只存 SHA-256 哈希前缀。带基础频率限制。
 
-`GET` 需要管理 token，返回测速反馈汇总（平均速度、最高速度、COLO 分布）和明细列表。
+`GET` 需要管理 token，支持 `?days=N&limit=M`（`days` 上限 90、`limit` 上限 1000），返回测速汇总（平均速度、最高速度、COLO 分布、按天趋势 `trend`）和明细列表，`storage` 字段标明当前走 D1 还是 KV。
 
-读取测速汇总：
+读取测速汇总与按天趋势：
 
 ```bash
 curl -H "Authorization: Bearer 你的SUB_TOKEN" \
-  https://你的域名/api/speedtest-feedback
+  "https://你的域名/api/speedtest-feedback?days=14"
 ```
+
+趋势面板也可在 `/admin.html` 的「测速趋势」区块直接查看。
 
 ### 模板配置
 
@@ -600,7 +619,7 @@ curl -H "User-Agent: v2rayN/edgetunnel (https://github.com/cmliu/edgetunnel)" "h
 curl -H "Authorization: Bearer 你的SUB_TOKEN" "https://你的域名/api/speedtest-feedback"
 ```
 
-订阅接口 `/sub`、`/best` 和 `/versions` 默认需要只读 token。推荐在客户端订阅 URL 使用短参数；首页上线后会通过 `/api/read-token` 自动读取 `SUB_READ_TOKEN` 并生成这种 URL：
+订阅接口 `/sub`、`/best` 和 `/versions` 默认需要只读 token。推荐在客户端订阅 URL 使用短参数；首页上线后会通过 `/api/read-token` 用管理 token 换取 `SUB_READ_TOKEN` 并生成这种 URL：
 
 ```text
 /sub?type=v2rayng&t=你的SUB_READ_TOKEN
@@ -667,6 +686,7 @@ GitHub Actions 的运行机和很多 VPS 默认没有 IPv6 出口，无法连通
 ```text
 docs/cloudflare-setup.md
 docs/deploy-checklist.md
+docs/d1-setup.md
 docs/source-research.md
 ```
 

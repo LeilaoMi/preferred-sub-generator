@@ -17,7 +17,7 @@
 ## Cloudflare Pages 环境变量
 
 - [ ] `SUB_TOKEN` 已设置，用于管理模板。
-- [ ] `SUB_READ_TOKEN` 已设置，用于客户端读取 `/sub`、`/best` 和 `/versions`；首页上线后会自动把它拼进订阅 URL。
+- [ ] `SUB_READ_TOKEN` 已设置，用于客户端读取 `/sub`、`/best` 和 `/versions`；首页上线后用管理 token 从 `/api/read-token` 换取它并自动拼进订阅 URL（匿名请求只能得到 `configured` 标记）。
 - [ ] 未设置 `SUB_PUBLIC=1`，除非你明确要公开订阅。
 
 ## 数据源
@@ -59,6 +59,6 @@
 
 - [ ] 如需轮换 token，先添加 `SUB_TOKEN_NEXT`，确认可用后再替换 `SUB_TOKEN`。
 - [ ] 如需限制管理来源，配置 `SUB_ALLOWED_IPS`。
-- [ ] 如需刷新通知，配置 `UPDATE_WEBHOOK_URL`。
+- [ ] 如需告警通知，配置 `UPDATE_WEBHOOK_URL`；可用 `ALERT_MIN_AVAILABLE` / `ALERT_FALLBACK_THRESHOLD` / `ALERT_DROP_RATIO` 调阈值，`UPDATE_WEBHOOK_ALWAYS=1` 恢复每次推送。
 - [ ] 如果使用多模板，确认 `/api/template?slot=1` 和 `/sub?template=1` 行为符合预期。
 - [ ] 如需回滚优选结果，确认 `/versions` 可列出版本，`/best?version=last` 可读取最近快照。

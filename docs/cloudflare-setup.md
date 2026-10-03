@@ -5,11 +5,11 @@
 ## 当前实际部署
 
 ```text
-生产自定义域名：https://yxdy.woniu.bee.al
-Pages 项目名：preferred-sub-generator-zrd
+生产自定义域名：https://your-domain.example.com
+Pages 项目名：your-pages-project
 最近验证预览：https://3b090ee2.pre
 KV 绑定变量：SUB_KV
-KV Namespace ID：9c1be2549489489ca8c55c5886b56b3d
+KV Namespace ID：<your-kv-namespace-id>
 ```
 
 线上已验证：
@@ -17,7 +17,7 @@ KV Namespace ID：9c1be2549489489ca8c55c5886b56b3d
 ```text
 /status                         HTTP 200
 /health                         HTTP 200
-/api/read-token                 HTTP 200，configured: true
+/api/read-token                 匿名 HTTP 200，仅 { configured: true }；带管理 token 才返回 readToken
 /sub?type=v2rayng&t=只读token   HTTP 200，返回 base64 订阅
 /best?n=2&t=只读token           HTTP 200，返回 JSON
 ```
@@ -51,7 +51,7 @@ Namespace ID 同步到：
 Pages 项目设置：
 
 ```text
-项目名：preferred-sub-generator-zrd
+项目名：your-pages-project
 构建命令：留空
 构建输出目录：public
 Functions 目录：functions
@@ -64,7 +64,7 @@ KV 绑定变量名：SUB_KV
 
 ```text
 SUB_TOKEN        管理 token，只用于 /api/template 和 /health/full
-SUB_READ_TOKEN   只读 token，用于 /sub、/best、/versions；首页会通过 /api/read-token 读取并自动拼到订阅 URL
+SUB_READ_TOKEN   只读 token，用于 /sub、/best、/versions；首页用管理 token 从 /api/read-token 换取并自动拼到订阅 URL
 ```
 
 可选环境变量：
@@ -79,13 +79,13 @@ SOURCE_MAX_BYTES=5242880   远程候选源最大读取字节数，默认 5MB
 REQUIRE_CF_RAY=1           只保留带 cf-ray 的 Cloudflare Edge 验证结果，默认开启
 ALLOW_TCP_ONLY=1           兼容 TCP 可达但无 cf-ray 的结果，默认关闭
 VERSION_RETENTION=30       BEST_IPS_* 版本快照保留数量，默认 30
-UPDATE_WEBHOOK_URL         自动刷新完成后的通知 Webhook
+UPDATE_WEBHOOK_URL         告警 Webhook，仅状态变化/恶化/恢复/运行失败时推送
 ```
 
 安全边界：
 
 - `/sub`、`/best`、`/versions` 默认需要只读 token。
-- `/api/read-token` 会返回 `SUB_READ_TOKEN`，目的是让首页生成可直接导入客户端的订阅 URL。
+- `/api/read-token` 默认只返回 `{ configured }`；带 `Authorization: Bearer <SUB_TOKEN>` 才返回 `SUB_READ_TOKEN` 的值，目的是让首页生成可直接导入客户端的订阅 URL，同时避免匿名访客拉走只读 token。
 - `/api/template` 和 `/health/full` 使用管理 token `SUB_TOKEN`，默认只接受 `Authorization: Bearer <SUB_TOKEN>`。
 - 管理 token 不要拼进 URL，也不要给客户端订阅使用。
 
@@ -114,7 +114,7 @@ npm run validate:sources
 ```bash
 CLOUDFLARE_API_TOKEN="$CLOUDFLARE_API_TOKEN_2" \
   npx wrangler pages deploy public \
-  --project-name preferred-sub-generator-zrd \
+  --project-name your-pages-project \
   --branch main \
   --commit-dirty=true
 ```
@@ -122,16 +122,16 @@ CLOUDFLARE_API_TOKEN="$CLOUDFLARE_API_TOKEN_2" \
 ## 7. 上线后验证
 
 ```text
-https://yxdy.woniu.bee.al/status
-https://yxdy.woniu.bee.al/health
-https://yxdy.woniu.bee.al/api/read-token
-https://yxdy.woniu.bee.al/health/full   # 需要 Authorization: Bearer 你的SUB_TOKEN
-https://yxdy.woniu.bee.al/sub?type=v2rayng&t=你的SUB_READ_TOKEN
-https://yxdy.woniu.bee.al/sub?type=clash&t=你的SUB_READ_TOKEN
-https://yxdy.woniu.bee.al/sub?type=singbox&t=你的SUB_READ_TOKEN
-https://yxdy.woniu.bee.al/sub?type=shadowrocket&t=你的SUB_READ_TOKEN
-https://yxdy.woniu.bee.al/best?n=20&t=你的SUB_READ_TOKEN
-https://yxdy.woniu.bee.al/versions?t=你的SUB_READ_TOKEN
+https://your-domain.example.com/status
+https://your-domain.example.com/health
+https://your-domain.example.com/api/read-token   # 匿名只返回 { configured: true }
+https://your-domain.example.com/health/full   # 需要 Authorization: Bearer 你的SUB_TOKEN
+https://your-domain.example.com/sub?type=v2rayng&t=你的SUB_READ_TOKEN
+https://your-domain.example.com/sub?type=clash&t=你的SUB_READ_TOKEN
+https://your-domain.example.com/sub?type=singbox&t=你的SUB_READ_TOKEN
+https://your-domain.example.com/sub?type=shadowrocket&t=你的SUB_READ_TOKEN
+https://your-domain.example.com/best?n=20&t=你的SUB_READ_TOKEN
+https://your-domain.example.com/versions?t=你的SUB_READ_TOKEN
 ```
 
 如必须公开订阅，才设置 `SUB_PUBLIC=1`。公开 `/health` 只返回最小状态，详细健康信息放在需要管理 token 的 `/health/full`。

@@ -1,5 +1,7 @@
 # 续接记录：部署变量 SUB_READ_TOKEN 自动拼接订阅链接
 
+> 历史记录：本文描述的 `/api/read-token` 公开返回只读 token 的行为已在后续安全修复中废弃——现在匿名请求只返回 `{ configured }`，必须带 `Authorization: Bearer <SUB_TOKEN>` 才能换到只读 token。本文仅保留作历史参考。
+
 生成时间：2026-06-05（Asia/Shanghai）
 项目路径：`/home/workspace/Projects/preferred-sub-generator`
 
@@ -38,17 +40,17 @@ git diff --check：通过
 
 部署：
 ```text
-CLOUDFLARE_API_TOKEN="$CLOUDFLARE_API_TOKEN_2" npx wrangler pages deploy public --project-name preferred-sub-generator-zrd --branch main --commit-dirty=true
+CLOUDFLARE_API_TOKEN="$CLOUDFLARE_API_TOKEN_2" npx wrangler pages deploy public --project-name your-pages-project --branch main --commit-dirty=true
 ```
 
 部署成功预览：
 ```text
-https://b2f90a26.preferred-sub-generator-zrd.pages.dev
+https://<deployment>.your-pages-project.pages.dev
 ```
 
 线上验证域名：
 ```text
-https://yxdy.woniu.bee.al
+https://your-domain.example.com
 ```
 
 线上验证结果：
