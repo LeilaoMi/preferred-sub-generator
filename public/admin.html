@@ -87,6 +87,21 @@
       <div id="message" class="status">请先填写管理 token，或用 /admin.html#token=你的token 打开。</div>
       <div id="previewBox" class="grid"></div>
     </section>
+
+    <section class="card" style="margin-top: 24px;">
+      <h1 style="font-size: clamp(22px, 4vw, 32px);">测速趋势</h1>
+      <p>展示最近 14 天的测速反馈统计（按天聚合）。数据存储于 D1 或 KV，仅管理 token 可见。</p>
+
+      <label for="trendDays">统计天数</label>
+      <input id="trendDays" type="number" min="1" max="90" value="14" />
+
+      <button id="loadTrend">加载趋势</button>
+
+      <div id="trendMessage" class="status">尚未加载。</div>
+      <div id="trendStats" class="grid"></div>
+      <div id="trendChart"></div>
+      <div id="trendColos" class="grid"></div>
+    </section>
   </main>
 
   <script>
@@ -181,6 +196,80 @@
         setMessage("保存成功。订阅接口会立即使用新模板。", "good");
       } catch (error) {
         setMessage(error.message, "bad");
+      }
+    };
+
+    const trendMessage = document.getElementById("trendMessage");
+    const trendStats = document.getElementById("trendStats");
+    const trendChart = document.getElementById("trendChart");
+    const trendColos = document.getElementById("trendColos");
+
+    function setTrendMessage(text, type = "") {
+      trendMessage.textContent = text;
+      trendMessage.className = `status ${type}`;
+    }
+
+    function renderTrend(summary, storage) {
+      const stats = [
+        { key: "存储通道", value: storage === "d1" ? "D1" : "KV" },
+        { key: "样本总数", value: summary.count ?? 0 },
+        { key: "平均速度 (Mbps)", value: summary.averageSpeedMbps ?? "-" },
+        { key: "最高速度 (Mbps)", value: summary.maxSpeedMbps ?? "-" },
+      ];
+      trendStats.innerHTML = stats.map((item) => `
+        <div class="item">
+          <div class="key">${escapeHtml(item.key)}</div>
+          <div class="value">${escapeHtml(item.value)}</div>
+        </div>
+      `).join("");
+
+      const trend = Array.isArray(summary.trend) ? summary.trend : [];
+      const maxSpeed = Math.max(1, ...trend.map((day) => day.maxSpeedMbps || 0));
+      const maxCount = Math.max(1, ...trend.map((day) => day.count || 0));
+      trendChart.innerHTML = trend.length === 0
+        ? `<p>该时间窗口内没有数据。</p>`
+        : `<div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(44px, 1fr));">` +
+          trend.map((day) => {
+            const avg = day.averageSpeedMbps ?? 0;
+            const height = Math.max(4, Math.round((avg / maxSpeed) * 100));
+            const tip = `${day.date}\n平均 ${day.averageSpeedMbps ?? "-"} Mbps\n最高 ${day.maxSpeedMbps ?? "-"} Mbps\n样本 ${day.count} / ${maxCount}`;
+            return `
+              <div class="item" style="padding: 8px; text-align: center;" title="${escapeHtml(tip)}">
+                <div style="height: 90px; display: flex; align-items: flex-end; justify-content: center;">
+                  <div style="width: 70%; height: ${height}%; background: linear-gradient(180deg, #38bdf8, #818cf8); border-radius: 6px 6px 0 0;"></div>
+                </div>
+                <div class="key" style="margin-top: 6px; font-size: 10px;">${escapeHtml(day.date.slice(5))}</div>
+                <div class="key" style="font-size: 10px;">${day.count}</div>
+              </div>
+            `;
+          }).join("") +
+          `</div>`;
+
+      const colos = Array.isArray(summary.coloSummary) ? summary.coloSummary : [];
+      trendColos.innerHTML = colos.length === 0
+        ? `<p>该时间窗口内没有 COLO 数据。</p>`
+        : colos.map((item) => `
+          <div class="item">
+            <div class="key">${escapeHtml(item.colo)} · ${escapeHtml(item.count)} 次</div>
+            <div class="value">${escapeHtml(item.averageSpeedMbps ?? "-")} Mbps</div>
+          </div>
+        `).join("");
+    }
+
+    document.getElementById("loadTrend").onclick = async () => {
+      try {
+        const token = tokenInput.value.trim();
+        if (!token) throw new Error("请先填写管理 token");
+        const days = Math.min(90, Math.max(1, Number(document.getElementById("trendDays").value) || 14));
+        const response = await fetch(`/api/speedtest-feedback?days=${days}&limit=1000`, {
+          headers: { "Authorization": `Bearer ${token}` },
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "请求失败");
+        renderTrend(data.summary || {}, data.storage);
+        setTrendMessage(`已加载最近 ${days} 天趋势。`, "good");
+      } catch (error) {
+        setTrendMessage(error.message, "bad");
       }
     };
   </script>

@@ -1,9 +1,7 @@
 import { requireAuth } from "../security/auth.js";
 import { checkRateLimit } from "../security/rate-limit.js";
 import { jsonResponse } from "../utils/response.js";
-
-const FEEDBACK_KEY = "SPEED_FEEDBACK";
-const MAX_FEEDBACK = 100;
+import { hashClientIp, insertFeedback, loadFeedback, summarizeFeedback } from "./speedtest-db.js";
 
 function getClientIp(request) {
   return request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for")?.split(",")[0].trim() || "unknown";
@@ -29,42 +27,34 @@ export async function handleSpeedtestFeedbackPost(request, env) {
     return jsonResponse({ error: "Invalid speedMbps" }, 400);
   }
 
+  const clientIp = getClientIp(request);
   const entry = {
     at: new Date().toISOString(),
     colo,
     ipCountry,
     isp,
     speedMbps: Math.round(speedMbps * 100) / 100,
-    ip: getClientIp(request),
+    clientHash: await hashClientIp(clientIp),
   };
 
-  const existing = await env.SUB_KV.get(FEEDBACK_KEY);
-  let list = [];
-  if (existing) {
-    try { list = JSON.parse(existing); } catch { list = []; }
-  }
-  if (!Array.isArray(list)) list = [];
-  list.unshift(entry);
-  list = list.slice(0, MAX_FEEDBACK);
-  await env.SUB_KV.put(FEEDBACK_KEY, JSON.stringify(list, null, 2));
+  const storage = await insertFeedback(env, entry);
 
-  return jsonResponse({ ok: true, saved: entry });
+  return jsonResponse({
+    ok: true,
+    storage,
+    saved: { at: entry.at, colo: entry.colo, ipCountry: entry.ipCountry, isp: entry.isp, speedMbps: entry.speedMbps },
+  });
 }
 
 export async function handleSpeedtestFeedbackGet(request, env) {
   const auth = requireAuth(request, env);
   if (!auth.authorized) return jsonResponse({ error: auth.reason }, auth.reason === "Missing SUB_TOKEN" ? 500 : 401);
 
-  const value = await env.SUB_KV.get(FEEDBACK_KEY);
-  const list = value ? JSON.parse(value) : [];
+  const url = new URL(request.url);
+  const days = url.searchParams.get("days");
+  const now = Date.parse(env.FEEDBACK_NOW || "") || Date.now();
+  const { entries, storage } = await loadFeedback(env, { days, limit: url.searchParams.get("limit"), now });
+  const summary = summarizeFeedback(entries, { days, now, storage });
 
-  const speeds = list.map((x) => x.speedMbps).filter((x) => Number.isFinite(x));
-  const summary = speeds.length > 0 ? {
-    count: list.length,
-    averageSpeedMbps: Math.round(speeds.reduce((a, b) => a + b, 0) / speeds.length * 100) / 100,
-    maxSpeedMbps: Math.max(...speeds),
-    coloBreakdown: list.reduce((acc, x) => { acc[x.colo] = (acc[x.colo] || 0) + 1; return acc; }, {}),
-  } : { count: 0 };
-
-  return jsonResponse({ summary, feedback: list });
+  return jsonResponse({ summary, storage, feedback: entries });
 }
