@@ -259,7 +259,14 @@
       ["Shadowrocket", "/sub?type=shadowrocket"],
       ["优选列表", "/best?n=20"],
     ];
+    const READ_TOKEN_STORAGE_KEY = "preferred-sub-generator:read-token";
     let readToken = "";
+    let readTokenConfigured = false;
+    try {
+      readToken = localStorage.getItem(READ_TOKEN_STORAGE_KEY) || "";
+    } catch {
+      readToken = "";
+    }
     const adminTokenInput = document.getElementById("adminToken");
     const nodeLinkInput = document.getElementById("nodeLink");
     const formatSelect = document.getElementById("format");
@@ -312,15 +319,25 @@
     }
 
 
-    async function loadReadToken() {
+    async function loadReadToken(adminToken) {
       try {
-        const response = await fetch("/api/read-token");
+        const headers = {};
+        if (adminToken) headers.Authorization = `Bearer ${adminToken}`;
+        const response = await fetch("/api/read-token", { headers });
         const data = await response.json().catch(() => ({}));
-        readToken = typeof data.readToken === "string" ? data.readToken : "";
+        readTokenConfigured = Boolean(data.configured);
+        if (!data.configured) {
+          readToken = "";
+          try { localStorage.removeItem(READ_TOKEN_STORAGE_KEY); } catch {}
+        } else if (typeof data.readToken === "string" && data.readToken) {
+          readToken = data.readToken;
+          try { localStorage.setItem(READ_TOKEN_STORAGE_KEY, readToken); } catch {}
+        }
       } catch {
-        readToken = "";
+        // 保留 localStorage 里的只读 token
       }
       renderSubscriptions();
+      return readToken;
     }
 
     function renderTemplatePreview(preview) {
@@ -364,9 +381,17 @@
       return data;
     }
 
-    document.getElementById("showOnly").addEventListener("click", () => {
+    document.getElementById("showOnly").addEventListener("click", async () => {
       result.classList.add("visible");
-      resultHint.textContent = readToken ? "已显示订阅链接，已自动附带线上环境变量 SUB_READ_TOKEN。" : "已显示订阅链接；当前部署未读取到 SUB_READ_TOKEN，订阅接口仍需要只读 token。";
+      const adminToken = adminTokenInput.value.trim();
+      if (adminToken) await loadReadToken(adminToken);
+      if (readToken) {
+        resultHint.textContent = "已显示订阅链接，已自动附带只读 token，可直接复制到客户端导入。";
+      } else if (readTokenConfigured) {
+        resultHint.textContent = "已显示订阅链接；线上已配置只读 token，请先在“管理 token”里填入 SUB_TOKEN 并点击任一按钮换取，订阅链接才会自动附带。";
+      } else {
+        resultHint.textContent = "已显示订阅链接；当前部署未配置 SUB_READ_TOKEN，订阅接口仍需要只读 token。";
+      }
       renderSubscriptions();
     });
 
@@ -377,11 +402,12 @@
       if (!nodeLink.startsWith("vless://")) {
         resultHint.innerHTML = "<span class='danger'>请先粘贴 vless:// 节点链接。</span>";
       } else if (!token) {
-        resultHint.innerHTML = "<span class='warn'>请先填写管理 token，用来保存原始 VLESS 模板。</span> 上线后如果设置了 SUB_READ_TOKEN，下面订阅链接会自动附带只读 token，不会带管理 token。";
+        resultHint.innerHTML = "<span class='warn'>请先填写管理 token，用来保存原始 VLESS 模板。</span> 订阅链接的只读 token 也通过管理 token 换取，不会带管理 token 本身。";
       } else {
         try {
           const data = await saveTemplate(nodeLink, token);
-          resultHint.innerHTML = `已保存节点模板，并生成订阅链接。${readToken ? "订阅链接已自动附带线上环境变量 SUB_READ_TOKEN，不会带管理 token。" : "当前部署未读取到 SUB_READ_TOKEN；请先在 Cloudflare Pages 环境变量设置 SUB_READ_TOKEN。"}${renderTemplatePreview(data.preview)}`;
+          await loadReadToken(token);
+          resultHint.innerHTML = `已保存节点模板，并生成订阅链接。${readToken ? "订阅链接已自动附带只读 token（由管理 token 换取），不会带管理 token。" : readTokenConfigured ? "线上已配置 SUB_READ_TOKEN，但换取失败，请确认管理 token 是否正确。" : "当前部署未读取到 SUB_READ_TOKEN；请先在 Cloudflare Pages 环境变量设置 SUB_READ_TOKEN。"}${renderTemplatePreview(data.preview)}`;
         } catch (error) {
           resultHint.innerHTML = `<span class='danger'>${escapeHtml(error.message)}</span>`;
         }

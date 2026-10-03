@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { handleBest } from "../src/api/best.js";
+import { handleReadToken } from "../src/api/read-token.js";
 import { handleStatus } from "../src/api/status.js";
 import { handleSub } from "../src/api/sub.js";
 import { handleTemplateGet, handleTemplatePost } from "../src/api/template.js";
@@ -221,6 +222,68 @@ test("template API: POST saves new vless and returns parsed", async () => {
   assert.equal(parsed.preview.uuid, "22222222-2222-4222-8222-222222222222");
   assert.match(saved, /^vless:\/\//);
   assert.match(saved, /new\.example/);
+});
+
+test("read-token API: anonymous request only learns configured flag, never the token", async () => {
+  const response = await handleReadToken(new Request("https://example.com/api/read-token"), createEnv());
+  const parsed = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(parsed.configured, true);
+  assert.equal(parsed.readToken, undefined);
+});
+
+test("read-token API: admin token exchanges for read token", async () => {
+  const response = await handleReadToken(new Request("https://example.com/api/read-token", {
+    headers: { Authorization: "Bearer secret-token" },
+  }), createEnv());
+  const parsed = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(parsed.configured, true);
+  assert.equal(parsed.readToken, "read-token");
+});
+
+test("read-token API: read token itself cannot be exchanged", async () => {
+  const response = await handleReadToken(new Request("https://example.com/api/read-token", {
+    headers: { Authorization: "Bearer read-token" },
+  }), createEnv());
+  const parsed = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(parsed.configured, true);
+  assert.equal(parsed.readToken, undefined);
+});
+
+test("read-token API: wrong token does not leak the read token", async () => {
+  const response = await handleReadToken(new Request("https://example.com/api/read-token", {
+    headers: { Authorization: "Bearer wrong-token" },
+  }), createEnv());
+  const parsed = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(parsed.configured, true);
+  assert.equal(parsed.readToken, undefined);
+});
+
+test("read-token API: query token is rejected by default", async () => {
+  const response = await handleReadToken(new Request("https://example.com/api/read-token?token=secret-token"), createEnv());
+  const parsed = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(parsed.readToken, undefined);
+});
+
+test("read-token API: reports unconfigured when SUB_READ_TOKEN missing", async () => {
+  const env = createEnv();
+  env.SUB_READ_TOKEN = "";
+  const response = await handleReadToken(new Request("https://example.com/api/read-token", {
+    headers: { Authorization: "Bearer secret-token" },
+  }), env);
+  const parsed = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(parsed, { configured: false });
 });
 
 test("best requires read token by default", async () => {
