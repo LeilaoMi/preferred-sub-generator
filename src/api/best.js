@@ -1,6 +1,8 @@
 import { requireReadAuth } from "../security/auth.js";
 import { jsonResponse, unauthorizedResponse } from "../utils/response.js";
 import { readBestIpsVersion } from "./kv.js";
+import { loadIpScores } from "./ip-feedback.js";
+import { filterNodesByColo, parseColoFilter, rankNodesByScore } from "./node-filter.js";
 
 const MAX_NODES = 50;
 
@@ -12,7 +14,37 @@ export async function handleBest(request, env) {
   const requested = Number(url.searchParams.get("n") || 20);
   const limit = Number.isFinite(requested) && requested > 0 ? Math.min(requested, MAX_NODES) : 20;
   const version = url.searchParams.get("version") || "";
-  const nodes = await readBestIpsVersion(env.SUB_KV, version);
+  const allNodes = await readBestIpsVersion(env.SUB_KV, version);
 
-  return jsonResponse({ nodes: nodes.slice(0, limit), total: nodes.length, version: version || "current" });
+  const rawColo = url.searchParams.get("colo");
+  const { requested: requestedColos, colos } = parseColoFilter(rawColo, request);
+
+  let nodes = allNodes;
+  if (url.searchParams.get("rank") !== "off") {
+    const { scores } = await loadIpScores(env);
+    nodes = rankNodesByScore(nodes, scores);
+  }
+  const filtered = filterNodesByColo(nodes, colos);
+
+  const slice = filtered.nodes.slice(0, limit);
+  const measured = slice.filter((node) => node.userRtt != null).length;
+
+  const filterInfo = rawColo
+    ? {
+        requested: requestedColos,
+        resolved: colos,
+        matched: filtered.matched,
+        fallback: filtered.fallback || colos.length === 0,
+        matchedCount: filtered.matchedCount,
+        total: allNodes.length,
+      }
+    : undefined;
+
+  return jsonResponse({
+    nodes: slice,
+    total: filtered.nodes.length,
+    version: version || "current",
+    measured,
+    ...(filterInfo ? { filter: filterInfo } : {}),
+  });
 }

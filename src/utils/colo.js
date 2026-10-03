@@ -55,8 +55,13 @@ function shouldKeepName(name) {
 }
 
 export function formatEdgeNodeName(node, index) {
-  if (shouldKeepName(node.name)) return node.name;
-  const location = formatColo(node.colo) || "🌐 未识别地区";
-  const latency = Number.isFinite(Number(node.latency)) ? ` ${node.latency}ms` : "";
+  const measured = node.userRtt != null && Number.isFinite(Number(node.userRtt))
+    ? Math.round(Number(node.userRtt))
+    : null;
+  if (measured === null && shouldKeepName(node.name)) return node.name;
+  const location = formatColo(node.userColo || node.colo) || "🌐 未识别地区";
+  const latency = measured !== null
+    ? ` ${measured}ms 实测`
+    : (Number.isFinite(Number(node.latency)) ? ` ${node.latency}ms` : "");
   return `${location}${latency} #${index + 1}`;
 }

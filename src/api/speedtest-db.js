@@ -20,12 +20,12 @@ const D1_SCHEMA_STATEMENTS = [
 
 const ensuredDbs = new WeakSet();
 
-async function ensureD1Schema(db) {
-  if (ensuredDbs.has(db)) return;
-  for (const statement of D1_SCHEMA_STATEMENTS) {
+export async function ensureD1Schema(db, statements = D1_SCHEMA_STATEMENTS, cache = ensuredDbs) {
+  if (cache.has(db)) return;
+  for (const statement of statements) {
     await db.prepare(statement).run();
   }
-  ensuredDbs.add(db);
+  cache.add(db);
 }
 
 export function clampOptions({ days, limit } = {}) {

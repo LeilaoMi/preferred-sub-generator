@@ -5,7 +5,9 @@ import { generateVlessUri } from "../generator/vless.js";
 import { requireReadAuth } from "../security/auth.js";
 import { jsonResponse, privateTextResponse, unauthorizedResponse } from "../utils/response.js";
 import { formatEdgeNodeName } from "../utils/colo.js";
+import { loadIpScores } from "./ip-feedback.js";
 import { readBestIps, readTemplate } from "./kv.js";
+import { filterNodesByColo, parseColoFilter, rankNodesByScore } from "./node-filter.js";
 
 const MAX_NODES = 50;
 
@@ -70,7 +72,13 @@ export async function handleSub(request, env) {
 
   const type = edgeProbe ? "base64" : (url.searchParams.get("type") || "vless").toLowerCase();
   const template = await readTemplate(env.SUB_KV, templateKeyFromUrl(url));
-  const nodes = (await readBestIps(env.SUB_KV)).slice(0, getLimit(url, MAX_NODES));
+  const { colos } = parseColoFilter(url.searchParams.get("colo"), request);
+  let nodes = await readBestIps(env.SUB_KV);
+  if (url.searchParams.get("rank") !== "off") {
+    const { scores } = await loadIpScores(env);
+    nodes = rankNodesByScore(nodes, scores);
+  }
+  nodes = filterNodesByColo(nodes, colos).nodes.slice(0, getLimit(url, MAX_NODES));
 
   if (nodes.length === 0) {
     return jsonResponse(errorPayload("NO_AVAILABLE_NODES", "No available nodes"), 503);
