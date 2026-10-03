@@ -20,7 +20,7 @@
 - 自动检测候选 IP 的可达性、延迟和 Cloudflare COLO。
 - 排序策略：**优先按带宽（speed）降序**，带宽数据来自 CSV 源的下载速度；无带宽数据的候选回退按延迟升序。国内访问场景下带宽比延迟更能反映实际体验。
 - 提供浏览器本地测速反馈面板：首页「开始测速」按钮在用户浏览器本地通过 Cloudflare 官方端点 `speed.cloudflare.com/__down` 实测下载速度，结果回传 `/api/speedtest-feedback` 存入 D1（未绑定时回退 KV），可用于验证国内真实访问质量；`/admin.html` 提供按天趋势面板。
-- `/status` 会标注测速地点（`speedtestLocation`，当前为 `GitHub Actions (US)`）和平均带宽（`averageSpeed`），让你清楚知道候选 IP 的延迟是在哪测的。
+- `/status` 会标注测速地点（`speedtestLocation`，当前为 `GitHub Actions (US)`）、平均延迟（`averageLatency`）和平均带宽（`averageSpeed`；GitHub Actions 环境不做带宽测速，当前实际为 `null`，国内真实速度请用首页「开始测速」或本地探测脚本）。
 - 订阅节点名称支持中文友好 COLO 展示，例如：
 
 ```text
@@ -98,7 +98,7 @@ Cloudflare Pages 是推荐部署方式，也是当前仓库实际验证的部署
 Pages 项目名：your-pages-project
 最近验证预览：https://<deployment>.your-pages-project.pages.dev
 KV 绑定变量：SUB_KV
-KV Namespace ID：见 wrangler.toml（公开仓库文档不记录真实 ID）
+KV Namespace ID / D1 database_id：见 wrangler.toml（非密钥，可随仓库公开；真正的凭据只有环境变量里的 token）
 ```
 
 当前线上关键行为：
@@ -109,7 +109,10 @@ KV Namespace ID：见 wrangler.toml（公开仓库文档不记录真实 ID）
 /api/read-token                 匿名只返回是否配置 SUB_READ_TOKEN；带管理 token Bearer 才返回只读 token 值，HTTP 200
 /api/speedtest-feedback         POST 公开回传浏览器本地测速结果（colo/speed）；GET 需管理 token 查看汇总与按天趋势
 /sub?type=v2rayng&t=只读token   返回 v2rayNG base64 订阅，HTTP 200
-/best?n=2&t=只读token           返回优选 IP JSON，HTTP 200
+/sub?t=只读token&colo=auto       按线路过滤后的订阅，无匹配自动回退全量
+/best?n=2&t=只读token           返回优选 IP JSON，HTTP 200，含 measured（实测节点数），带 colo= 时含 filter
+/best?n=2&t=只读token&rank=off   关闭按实测数据重排
+/api/ip-feedback                POST 需管理 token 回传逐 IP 实测；GET 需管理 token 查看聚合分数（默认统计 14 天）
 /sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000  edgetunnel 探测旁路，免 token 返回占位 base64 订阅（UA 需含 edgetunnel）
 ```
 
@@ -250,15 +253,17 @@ VERSION_RETENTION=30      BEST_IPS_* 版本快照保留数量，默认 30
 ```bash
 npm test
 npm run preflight
-npx wrangler pages deploy public --project-name your-pages-project --branch main --commit-dirty=true
+npx wrangler pages deploy public --project-name your-pages-project --commit-dirty=true
 ```
+
+不写 `--branch` 才是上生产；`--branch <名字>` 会部署成该分支的预览版本（只对连接了 Git 的项目有意义）。
 
 如果需要指定账号和 token：
 
 ```bash
 CLOUDFLARE_ACCOUNT_ID=你的账号ID \
 CLOUDFLARE_API_TOKEN=你的API_TOKEN \
-npx wrangler pages deploy public --project-name your-pages-project --branch main --commit-dirty=true
+npx wrangler pages deploy public --project-name your-pages-project --commit-dirty=true
 ```
 
 ### 方式 B：Cloudflare Dashboard 连接 GitHub
