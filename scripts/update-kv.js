@@ -4,6 +4,7 @@ import { formatEdgeNodeName } from "../src/utils/colo.js";
 import { getPortsForSecurity } from "../src/utils/ports.js";
 import { checkCandidates } from "./lib/check.js";
 import { collectCandidatesWithHealth } from "./lib/candidates.js";
+import { runAlertStage } from "./lib/alert.js";
 import { deleteKvValue, readKvValue, writeKvValue } from "./lib/kv.js";
 
 const ROOT = new URL("..", import.meta.url);
@@ -237,30 +238,43 @@ async function readPreviousVersionIndex() {
   }
 }
 
-async function notifyWebhook(payload) {
+async function postWebhook(body) {
   const url = process.env.UPDATE_WEBHOOK_URL;
-  if (!url) return;
+  if (!url) return false;
 
-  const status = JSON.parse(payload.STATUS);
   try {
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        event: "preferred-sub-generator.update",
-        updatedAt: status.updatedAt,
-        available: status.available,
-        newAvailable: status.newAvailable,
-        fallbackActive: status.protectedByPrevious,
-        consecutiveFallbacks: status.consecutiveFallbacks,
-        lastSuccessfulRefreshAt: status.lastSuccessfulRefreshAt,
-        lastError: status.lastError,
-      }),
+      body: JSON.stringify(body),
     });
     if (!response.ok) console.warn(`Webhook notification failed: ${response.status}`);
+    return response.ok;
   } catch (error) {
     console.warn(`Webhook notification failed: ${error.message}`);
+    return false;
   }
+}
+
+async function readPreviousAlertState() {
+  const value = await readKvValue({
+    accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+    namespaceId: process.env.CLOUDFLARE_NAMESPACE_ID,
+    apiToken: process.env.CLOUDFLARE_API_TOKEN,
+    key: "ALERT_STATE",
+  });
+  if (!value) return null;
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function numberEnv(name) {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) ? value : undefined;
 }
 
 export async function main() {
@@ -275,6 +289,7 @@ export async function main() {
   const previousTrend = await readPreviousTrendHistory();
   const previousStatus = await readPreviousStatus();
   const previousVersionIndex = await readPreviousVersionIndex();
+  const previousAlertState = await readPreviousAlertState();
   const originalNode = process.env.ORIGINAL_SUB_OR_NODE || await readCurrentTemplate();
   const env = {
     REQUIRE_CF_RAY: process.env.REQUIRE_CF_RAY || "1",
@@ -318,13 +333,48 @@ export async function main() {
     });
   }
 
-  await notifyWebhook(payload);
+  const alert = await runAlertStage({
+    status: JSON.parse(payload.STATUS),
+    previousStatus,
+    previousAlertState,
+    repeatHours: numberEnv("ALERT_REPEAT_HOURS"),
+    fallbackThreshold: numberEnv("ALERT_FALLBACK_THRESHOLD"),
+    minAvailable: numberEnv("ALERT_MIN_AVAILABLE"),
+    dropRatio: numberEnv("ALERT_DROP_RATIO"),
+    always: process.env.UPDATE_WEBHOOK_ALWAYS === "1",
+    notify: postWebhook,
+    saveState: (state) => writeKvValue({
+      accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+      namespaceId: process.env.CLOUDFLARE_NAMESPACE_ID,
+      apiToken: process.env.CLOUDFLARE_API_TOKEN,
+      key: "ALERT_STATE",
+      value: JSON.stringify(state, null, 2),
+    }),
+  });
+
   console.log(`KV updated: ${Object.keys(payload).join(", ")}`);
+  console.log(`Alert: level=${alert.level} notified=${alert.notified} type=${alert.alertType}`);
+}
+
+export async function reportRunFailure(error) {
+  await postWebhook({
+    event: "preferred-sub-generator.alert",
+    alertType: "run-failed",
+    level: "critical",
+    reasons: ["run-failed"],
+    error: error?.message || String(error),
+    failedAt: new Date().toISOString(),
+  });
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((error) => {
+  main().catch(async (error) => {
     console.error(error.message);
+    try {
+      await reportRunFailure(error);
+    } catch {
+      // 通知失败不影响退出码
+    }
     process.exit(1);
   });
 }
