@@ -29,6 +29,11 @@
 🇸🇬 新加坡 SIN 22ms #3
 ```
 
+- 节点名里出现 `28ms 实测` 时，COLO 和延迟来自**你本机的实测**（`scripts/probe-ips.js` 回传的数据），而不是美国扫描机看到的数字。
+- 订阅支持按线路过滤：`/sub?colo=HKG`、`/best?colo=auto`（`auto` = 你当前接入点），无匹配时自动回退全量，订阅不会变空。
+- 支持在本机探测每个候选 IP 的 TCP 握手延迟、落地 COLO 和下载带宽，回传 `/api/ip-feedback` 后订阅自动按你的实测结果重排——这是让代理真正变快的关键一步。
+- 首页状态卡显示「你的接入点」和「你的延迟」（你到 Cloudflare 边缘的真实 RTT，3 次取最小）。
+
 - 支持输出格式：
   - VLESS 链接列表
   - v2rayNG base64 订阅
@@ -44,6 +49,7 @@
   - `/versions`
   - `/api/read-token`
   - `/api/template`
+  - `/api/ip-feedback`
 - `/sub`、`/best` 默认需要只读 token，避免真实订阅被公开拉取。
 - `/api/template` 需要管理 token，仅用于保存或读取原始 VLESS 模板，token 不会拼进订阅链接。
 - API 默认带 noindex / nosniff / no-referrer 等安全响应头，`public/robots.txt` 默认禁止搜索引擎索引。
@@ -141,6 +147,9 @@ functions/health.js              健康检查接口
 functions/api/read-token.js      用管理 token 换取 SUB_READ_TOKEN，用于首页自动拼订阅 URL
 functions/api/template.js        模板读取/保存接口
 functions/api/speedtest-feedback.js  浏览器本地测速结果回传与汇总
+functions/api/ip-feedback.js      逐 IP 实测数据回传与读取
+src/api/node-filter.js            线路过滤与按实测数据重排
+src/api/ip-feedback.js            实测数据存储抽象与聚合
 src/parser/vless.js              VLESS 解析
 src/generator/vless.js           VLESS 生成
 src/generator/clash.js           Clash/Mihomo 输出
@@ -150,6 +159,7 @@ src/utils/colo.js                COLO 中文命名
 src/api/speedtest-feedback.js    测速反馈接收与汇总
 src/api/speedtest-db.js          测速反馈存储抽象（D1 优先，KV 回退）与按天聚合
 scripts/update-kv.js             聚合、检测并写入 KV
+scripts/probe-ips.js             本机探测候选 IP 延迟/COLO/带宽并回传
 scripts/lib/candidates.js        候选源解析
 scripts/lib/check.js             TCP/HTTP Edge 检测
 docs/cloudflare-setup.md         Cloudflare 设置说明
@@ -426,6 +436,8 @@ n=20        限制返回节点数量，最多 50
 template=1  使用 TEMPLATE_1 模板槽位，支持 1-5
 slot=1      使用 TEMPLATE_1 模板槽位，template 的别名
 wrap=76     v2rayNG/base64 输出按固定宽度换行，兼容老客户端/复制场景
+colo=HKG    只保留该线路节点，逗号分隔多个；auto = 你的接入点；无匹配回退全量
+rank=off    关闭按本地实测数据重排（默认开启）
 ```
 
 特殊：edgetunnel 探测旁路。当请求同时满足 `host=example.com` + `uuid=00000000-0000-4000-8000-000000000000` + UA 含 `edgetunnel` 时，`/sub` 免只读 token 放行，固定返回 base64 编码的占位订阅（占位 uuid/host，不泄露真实参数），用于对接 cmliu 版 edgetunnel 的 `sub://` 协议。详见「与 edgetunnel 配合」。
@@ -435,9 +447,15 @@ wrap=76     v2rayNG/base64 输出按固定宽度换行，兼容老客户端/复�
 ```text
 GET /best?n=20
 GET /best?n=20&version=last
+GET /best?n=20&colo=auto
+GET /best?n=20&rank=off
 ```
 
 返回当前 KV 中的优选节点 JSON。`version=last` 返回最近一次版本化快照。
+
+`colo=` 过滤会返回 `filter` 字段说明命中情况（`matched` / `fallback` / `matchedCount` / `total`）；`rank` 默认按本地实测数据重排，命中的节点带 `userRtt`、`userColo`、`userSpeed` 字段，顶层 `measured` 表示本次返回里有多少个节点是实测过的。带 `colo=` 时返回的 `total` 是过滤后的节点数。
+
+匹配优先级：先看你本机回传的落地 COLO（`userColo`），再看扫描记录的 COLO（`colo`）。
 
 ### 优选版本
 
@@ -475,6 +493,29 @@ curl -H "Authorization: Bearer 你的SUB_TOKEN" \
 ```
 
 趋势面板也可在 `/admin.html` 的「测速趋势」区块直接查看。
+
+### 实测反馈（IP 级）
+
+```text
+POST /api/ip-feedback
+GET  /api/ip-feedback
+```
+
+`POST` 需要管理 token，接收 `scripts/probe-ips.js` 回传的逐 IP 实测结果：
+
+```json
+{
+  "results": [
+    { "address": "104.25.85.85", "port": 443, "rtt": 38.4, "colo": "HKG", "region": "HK", "speed": 42.1 }
+  ]
+}
+```
+
+`rtt` 是本机 TCP 握手延迟（毫秒，必填），`colo`/`region` 是连该 IP 时 `/cdn-cgi/trace` 返回的落地点，`speed` 是下载带宽 Mbps（可选）。单次最多 200 条，带基础频率限制，原始 IP 不落库（只存 SHA-256 哈希前缀以外的必要字段：地址本身是公开的 CF 边缘 IP，不是你的 IP）。存储优先写 D1 的 `ip_feedback` 表，未绑定 `SPEED_DB` 时回退 KV 的 `IP_FEEDBACK`（最多 500 条）。
+
+`GET` 需要管理 token，`?days=N`（默认 14、上限 90）返回按 IP 聚合的分数（`rtt` 平均值、`speed` 平均值、最新 `colo`、样本数）。
+
+`/sub` 与 `/best` 读取最近窗口内的实测数据重排节点：实测过的节点按实测 RTT 升序排前面，未实测的按原顺序跟在后面；`rank=off` 可关闭。数据全空时行为与旧版完全一致。
 
 ### 模板配置
 
@@ -584,6 +625,43 @@ CIDR 源支持：
 }
 ```
 
+## 本地探测与线路过滤（按你的真实线路选 IP）
+
+扫描机跑在 GitHub Actions（美国），它测出来的延迟和 COLO 只代表**美国机房视角**；Cloudflare 官方 IP 是 anycast，你连过去落在哪个 PoP、走哪条线路，取决于你的运营商到这段 IP 的路由，两者经常完全相反。想让代理真正变快，就得从你自己的机器测一遍。
+
+### 为什么不能在服务端或浏览器里测
+
+- Cloudflare 明确禁止 Workers 对 Cloudflare IP 段发起出站 TCP（`connect()` 直接报 `Outbound TCP sockets to Cloudflare IP ranges are blocked`），边缘函数测不了候选 IP。
+- 浏览器直连裸 IP 会因 SNI/证书校验失败，拿不到可靠延迟，而且 https 页面也不允许发到 `http://IP` 的混合内容请求。
+- 所以实测只能从你的机器发起——这同时也正是最准的那个视角。
+
+### 用法
+
+需要 Node.js 18+，在能访问你站点的机器上执行：
+
+```bash
+SUB_TOKEN=你的管理token SITE_URL=https://你的域名 node scripts/probe-ips.js
+```
+
+常用参数：
+
+```text
+--speed 5        每个 IP 下载测 5MB 再测带宽（默认 2，0 = 只测延迟）
+--colo auto      只探测你接入点的线路；或 --colo HKG,NRT
+--n 20           只测前 20 个候选
+--concurrency 8  延迟探测并发（默认 8）
+--no-submit      只打印结果不回传
+--json out.json  额外把结果导出成 JSON
+```
+
+脚本分两步：先并发测每个候选的 TCP 握手延迟和连该 IP 时的落地 COLO（`/cdn-cgi/trace`），再以并发 2 测下载带宽，最后打印排序结果并回传 `/api/ip-feedback`。
+
+### 回传之后
+
+- `/sub` 和 `/best` 默认按实测 RTT 升序重排，实测过的节点排前面，节点名变成 `🇭🇰 香港 HKG 28ms 实测 #1` 这种——COLO 和延迟都来自你的实测。`rank=off` 可以关掉。
+- 首页「线路过滤」填 `auto`（你的接入点）或 `HKG,NRT`，生成的订阅 URL 会自动带 `colo=`；过滤无匹配时回退全量，订阅不会变空。
+- 实测数据默认只统计最近 14 天；没有实测数据时，一切行为与旧版完全一致。
+
 ## 本地验证
 
 ```bash
@@ -676,6 +754,12 @@ GitHub Actions 的运行机和很多 VPS 默认没有 IPv6 出口，无法连通
 ```
 
 可以在 `src/utils/colo.js` 里补充映射。
+
+### 为什么扫描出来的 COLO 全是 LAX/SJC？
+
+因为扫描机跑在 GitHub Actions（美国），它看到的落点就是美国的 PoP。这不代表你连过去也会落在 LAX：Cloudflare 官方 IP 是 anycast，你实际落到哪个 PoP 由你的运营商到这段 IP 的路由决定。
+
+想拿到你自己的落点和延迟，跑一次 `node scripts/probe-ips.js`（见「本地探测与线路过滤」），回传后节点名里的 COLO 和延迟就变成你实测的值，`colo=auto` 线路过滤也才有意义。
 
 ## 📖 延伸阅读
 
