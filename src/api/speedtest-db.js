@@ -4,25 +4,27 @@ const DEFAULT_LIMIT = 100;
 const DEFAULT_DAYS = 14;
 const MAX_DAYS = 90;
 
-const D1_SCHEMA_SQL = `
-CREATE TABLE IF NOT EXISTS speed_feedback (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  created_at TEXT NOT NULL,
-  colo TEXT,
-  ip_country TEXT,
-  isp TEXT,
-  speed_mbps REAL NOT NULL,
-  client_hash TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_speed_feedback_created_at ON speed_feedback (created_at);
-CREATE INDEX IF NOT EXISTS idx_speed_feedback_colo ON speed_feedback (colo);
-`;
+const D1_SCHEMA_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS speed_feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at TEXT NOT NULL,
+    colo TEXT,
+    ip_country TEXT,
+    isp TEXT,
+    speed_mbps REAL NOT NULL,
+    client_hash TEXT
+  )`,
+  "CREATE INDEX IF NOT EXISTS idx_speed_feedback_created_at ON speed_feedback (created_at)",
+  "CREATE INDEX IF NOT EXISTS idx_speed_feedback_colo ON speed_feedback (colo)",
+];
 
 const ensuredDbs = new WeakSet();
 
 async function ensureD1Schema(db) {
   if (ensuredDbs.has(db)) return;
-  await db.exec(D1_SCHEMA_SQL);
+  for (const statement of D1_SCHEMA_STATEMENTS) {
+    await db.prepare(statement).run();
+  }
   ensuredDbs.add(db);
 }
 

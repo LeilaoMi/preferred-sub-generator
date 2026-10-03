@@ -19,10 +19,9 @@ function createD1Env() {
   const rows = [];
   let seq = 0;
   const db = {
-    execCalls: 0,
-    async exec() { this.execCalls += 1; },
+    schemaRuns: 0,
     prepare(sql) {
-      return {
+      const statement = {
         bind: (...args) => ({
           async run() {
             if (sql.startsWith("INSERT INTO speed_feedback")) {
@@ -47,7 +46,15 @@ function createD1Env() {
             throw new Error(`Unexpected all: ${sql}`);
           },
         }),
+        async run() {
+          if (sql.startsWith("CREATE ")) {
+            db.schemaRuns += 1;
+            return { success: true };
+          }
+          throw new Error(`Unexpected unbound run: ${sql}`);
+        },
       };
+      return statement;
     },
   };
   return { SPEED_DB: db, _rows: rows };
@@ -107,7 +114,7 @@ test("speedtest POST uses D1 when bound", async () => {
   assert.equal(env._rows[0].colo, "HKG");
   assert.equal(env._rows[0].speed_mbps, 88);
   assert.equal(typeof env._rows[0].client_hash, "string");
-  assert.ok(env.SPEED_DB.execCalls >= 1, "schema should be ensured before insert");
+  assert.ok(env.SPEED_DB.schemaRuns >= 3, "schema table and indexes should be ensured before insert");
 });
 
 test("speedtest POST rejects invalid speed", async () => {

@@ -5,3 +5,8 @@ compatibility_date = "2026-06-03"
 [[kv_namespaces]]
 binding = "SUB_KV"
 id = "9c1be2549489489ca8c55c5886b56b3d"
+
+[[d1_databases]]
+binding = "SPEED_DB"
+database_name = "speed-feedback"
+database_id = "c48eb726-e4f3-4cce-bd64-2c50d434d290"
