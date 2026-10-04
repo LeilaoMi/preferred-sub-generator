@@ -16,7 +16,8 @@ const HELP = `用法: node scripts/probe-ips.js [选项]
   --token <token>       管理 token（默认 env SUB_TOKEN）
   --n <count>           探测节点数量（默认 50）
   --speed <MB>          每个 IP 下载测速大小，默认 2；0 表示只测延迟
-  --sni <host>          测速用 SNI/Host（默认 speed.cloudflare.com）
+  --sni <host>          测速用 SNI/Host（默认取订阅模板的域名，取不到才用 speed.cloudflare.com）
+  --slot <n>            取哪个账号槽位的模板（1-5），决定默认 SNI
   --colo <list>         只探测指定 COLO，如 HKG,NRT；auto 表示你的接入点
   --concurrency <n>     延迟探测并发（默认 8）
   --timeout <ms>        单项超时（默认 5000）
@@ -26,7 +27,8 @@ const HELP = `用法: node scripts/probe-ips.js [选项]
 
 示例:
   node scripts/probe-ips.js --site https://yxdy.woniu.bee.al --token "$SUB_TOKEN"
-  node scripts/probe-ips.js --speed 5 --colo auto
+  node scripts/probe-ips.js --slot 2 --speed 5 --colo auto
+  node scripts/probe-ips.js --sni 2.leilaomi.ccwu.cc
 `;
 
 function parseTrace(text) {
@@ -151,6 +153,21 @@ async function fetchNodes(site, readToken, count) {
   return data.nodes;
 }
 
+async function fetchTemplateHost(site, token, slot) {
+  const query = slot ? `?slot=${encodeURIComponent(slot)}` : "";
+  try {
+    const response = await fetch(`${site}/api/template${query}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) return { host: "", key: "" };
+    const safe = data.templateSafe || {};
+    return { host: String(safe.host || safe.sni || "").trim(), key: String(data.key || "") };
+  } catch {
+    return { host: "", key: "" };
+  }
+}
+
 async function fetchOwnColo(site, timeoutMs) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.min(timeoutMs, 3000));
@@ -190,7 +207,8 @@ async function main() {
       token: { type: "string" },
       n: { type: "string", default: "50" },
       speed: { type: "string", default: "2" },
-      sni: { type: "string", default: "speed.cloudflare.com" },
+      sni: { type: "string" },
+      slot: { type: "string" },
       colo: { type: "string", default: "" },
       concurrency: { type: "string", default: "8" },
       timeout: { type: "string", default: "5000" },
@@ -214,9 +232,23 @@ async function main() {
   const speedMb = Math.max(0, Number(values.speed) || 0);
   const timeoutMs = Math.max(1000, Number(values.timeout) || 5000);
   const concurrency = Math.max(1, Math.min(Number(values.concurrency) || 8, 32));
-  const servername = String(values.sni || "speed.cloudflare.com");
+
+  const explicitSni = String(values.sni || "").trim();
+  let servername = explicitSni;
+  let templateKey = "";
+  if (!servername) {
+    const template = await fetchTemplateHost(site, token, values.slot);
+    servername = template.host;
+    templateKey = template.key;
+  }
+  if (!servername) servername = "speed.cloudflare.com";
 
   console.log(`站点: ${site}`);
+  console.log(`探测 SNI/Host: ${servername}${
+    explicitSni ? "（--sni 指定）"
+      : templateKey ? `（模板 ${templateKey}）`
+        : "（未取到模板，回退）"
+  }`);
   const readToken = await fetchReadToken(site, token);
   let nodes = await fetchNodes(site, readToken, count);
   console.log(`候选节点: ${nodes.length} 个`);
@@ -237,7 +269,9 @@ async function main() {
     const address = String(node.address || "");
     const port = Number(node.port) || 443;
     const rtt = await tcpRtt(address, port, timeoutMs);
-    if (rtt === null) return { address, port, rtt: null, colo: "", region: "", speed: null };
+    if (rtt === null) {
+      return { address, port, rtt: null, colo: "", region: "", speed: null, ok: false };
+    }
     const trace = await traceEdge(address, port, { servername, timeoutMs });
     return {
       address,
@@ -246,13 +280,18 @@ async function main() {
       colo: trace?.colo || "",
       region: trace?.region || "",
       speed: null,
+      // TCP 通了但对该域名拿不到可用回包（如 1034 拦截、非 2xx）也算不可用
+      ok: Boolean(trace),
     };
   });
 
-  const alive = probed.filter((item) => item.rtt !== null);
-  const dead = probed.length - alive.length;
+  const alive = probed.filter((item) => item.ok);
+  const unreachable = probed.filter((item) => !item.ok);
   if (alive.length === 0) throw new Error("所有节点都连不上，请检查网络");
-  if (dead > 0) console.log(`   ${dead} 个节点连接失败，已跳过`);
+  if (unreachable.length > 0) {
+    const list = unreachable.map((item) => item.address);
+    console.log(`   ${unreachable.length} 个节点不可用（连不上或对该域名返回非 2xx）：${list.slice(0, 8).join(", ")}${list.length > 8 ? " …" : ""}`);
+  }
 
   if (speedMb > 0) {
     const bytes = Math.round(speedMb * 1000000);
@@ -283,13 +322,14 @@ async function main() {
   const response = await fetch(`${site}/api/ip-feedback`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ results: alive }),
+    // 连不上的也一并回传（ok:false），服务端据此剔除不可用 IP
+    body: JSON.stringify({ results: probed }),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok || !data.ok) {
     throw new Error(`回传失败 ${response.status}: ${data.error || "unknown"}`);
   }
-  console.log(`已回传 ${data.saved} 条实测数据（${data.storage}）。`);
+  console.log(`已回传 ${data.saved} 条实测数据（可用 ${alive.length} / 不可用 ${unreachable.length}，${data.storage}）。`);
   console.log(`订阅地址（按你的实测重排）: ${site}/sub?type=v2rayng&t=${readToken}`);
 }
 

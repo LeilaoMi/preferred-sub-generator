@@ -49,19 +49,23 @@ export function rankNodesByScore(nodes, scores) {
   const list = Array.isArray(nodes) ? nodes : [];
   if (!scores || scores.size === 0) return list;
 
+  // 实测判定为不可用的 IP 直接剔除；若全部不可用则保留原列表（避免订阅被清空）
+  const filtered = list.filter((node) => scores.get(node?.address)?.unreachable !== true);
+  const base = filtered.length > 0 ? filtered : list;
+
   const measured = [];
   const rest = [];
-  list.forEach((node, index) => {
+  base.forEach((node, index) => {
     const score = scores.get(node?.address);
     const rtt = Number(score?.rtt);
-    if (score && Number.isFinite(rtt)) {
+    if (score && !score.unreachable && Number.isFinite(rtt)) {
       measured.push({ node, index, score, rtt });
     } else {
       rest.push(node);
     }
   });
 
-  if (measured.length === 0) return list;
+  if (measured.length === 0) return base;
 
   measured.sort((a, b) => a.rtt - b.rtt
     || (Number(b.score.speed || 0) - Number(a.score.speed || 0))

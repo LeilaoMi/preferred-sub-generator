@@ -49,6 +49,7 @@ function createMockD1(initial = []) {
               rtt_ms: args[5],
               speed_mbps: args[6],
               client_hash: args[7],
+              ok: args[8],
             });
             return { success: true };
           },
@@ -66,6 +67,7 @@ function createMockD1(initial = []) {
                 rtt_ms: row.rtt_ms,
                 speed_mbps: row.speed_mbps,
                 client_hash: row.client_hash,
+                ok: row.ok,
               })),
           }),
         }),
@@ -226,6 +228,142 @@ test("ip feedback POST writes to D1 when bound", async () => {
   const { scores, storage } = await loadIpScores({ SPEED_DB: d1 });
   assert.equal(storage, "d1");
   assert.equal(scores.get("1.1.1.1").rtt, 12.3);
+});
+
+test("ip feedback POST accepts unreachable probes flagged ok:false", async () => {
+  const env = createEnv();
+  const response = await handleIpFeedbackPost(postRequest({
+    results: [
+      { address: "1.1.1.1", port: 443, rtt: 12, colo: "HKG", ok: true },
+      { address: "1.1.1.4", port: 443, rtt: null, colo: "", ok: false },
+      { address: "1.1.1.5", port: 443, rtt: 9, colo: "", ok: false },
+    ],
+  }), env);
+  const posted = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(posted.saved, 3);
+
+  const scores = summarizeIpScores([
+    { at: RECENT_AT, address: "1.1.1.4", rtt: null, ok: false },
+    { at: RECENT_AT, address: "1.1.1.5", rtt: 9, ok: false },
+    { at: RECENT_AT, address: "1.1.1.5", rtt: 11, ok: true },
+    { at: RECENT_AT, address: "1.1.1.1", rtt: 12, ok: true },
+  ]);
+
+  assert.equal(scores.get("1.1.1.4").unreachable, true);
+  assert.equal(scores.get("1.1.1.4").rtt, null);
+  assert.equal(scores.get("1.1.1.4").samples, 0);
+  assert.equal(scores.get("1.1.1.4").failed, 1);
+
+  assert.equal(scores.get("1.1.1.5").unreachable, false);
+  assert.equal(scores.get("1.1.1.5").failed, 1);
+  assert.equal(scores.get("1.1.1.5").samples, 1);
+  assert.equal(scores.get("1.1.1.1").unreachable, false);
+});
+
+test("ranking drops unreachable nodes but falls back when all are unreachable", () => {
+  const nodes = [{ address: "a" }, { address: "b" }, { address: "c" }];
+  const scores = new Map([
+    ["a", { rtt: 10, samples: 2, failed: 0, unreachable: false }],
+    ["b", { rtt: null, samples: 0, failed: 3, unreachable: true }],
+    ["c", { rtt: 50, samples: 1, failed: 0, unreachable: false }],
+  ]);
+
+  const ranked = rankNodesByScore(nodes, scores);
+  assert.deepEqual(ranked.map((node) => node.address), ["a", "c"]);
+
+  const allBad = new Map([
+    ["a", { rtt: null, samples: 0, failed: 3, unreachable: true }],
+    ["b", { rtt: null, samples: 0, failed: 4, unreachable: true }],
+    ["c", { rtt: null, samples: 0, failed: 5, unreachable: true }],
+  ]);
+  assert.deepEqual(rankNodesByScore(nodes, allBad).map((node) => node.address), ["a", "b", "c"]);
+});
+
+test("best reports how many unreachable nodes were dropped", async () => {
+  const env = createEnv();
+  await env.SUB_KV.put("IP_FEEDBACK", JSON.stringify([
+    { at: RECENT_AT, address: "1.1.1.3", rtt: null, ok: false },
+  ]));
+
+  const response = await handleBest(new Request("https://example.com/best?n=3", {
+    headers: { Authorization: "Bearer read-token" },
+  }), env);
+  const parsed = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(parsed.droppedUnreachable, 1);
+  assert.equal(parsed.nodes.length, 2);
+  assert.deepEqual(parsed.nodes.map((node) => node.address), ["1.1.1.1", "1.1.1.2"]);
+});
+
+test("sub omits unreachable nodes from the generated subscription", async () => {
+  const env = createEnv();
+  await env.SUB_KV.put("IP_FEEDBACK", JSON.stringify([
+    { at: RECENT_AT, address: "1.1.1.3", rtt: null, ok: false },
+  ]));
+
+  const response = await handleSub(new Request("https://example.com/sub?type=vless&n=3", {
+    headers: { Authorization: "Bearer read-token" },
+  }), env);
+  const text = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.doesNotMatch(text, /@1\.1\.1\.3:/);
+  assert.match(text, /@1\.1\.1\.1:443/);
+});
+
+test("ip feedback POST writes ok flag to D1 when bound", async () => {
+  const d1 = createMockD1();
+  const response = await handleIpFeedbackPost(postRequest({
+    results: [
+      { address: "1.1.1.1", rtt: 12.3, colo: "HKG", ok: true },
+      { address: "1.1.1.7", rtt: null, ok: false },
+    ],
+  }), createEnv({ SPEED_DB: d1 }));
+  const posted = await response.json();
+
+  assert.equal(posted.storage, "d1");
+  assert.equal(d1.rows.length, 2);
+  assert.equal(d1.rows[0].ok, 1);
+  assert.equal(d1.rows[1].ok, 0);
+  assert.equal(d1.rows[1].rtt_ms, 0);
+
+  const { scores } = await loadIpScores({ SPEED_DB: d1 });
+  assert.equal(scores.get("1.1.1.1").rtt, 12.3);
+  assert.equal(scores.get("1.1.1.7").unreachable, true);
+  assert.equal(scores.get("1.1.1.7").rtt, null);
+});
+
+test("ip feedback D1 migration degrades when the ok column cannot be ensured", async () => {
+  const duplicate = createMockD1();
+  const basePrepare = duplicate.prepare.bind(duplicate);
+  duplicate.prepare = (sql) => (/ALTER TABLE ip_feedback ADD COLUMN ok/.test(String(sql))
+    ? { run: async () => ({ success: false, error: "duplicate column name: ok" }) }
+    : basePrepare(sql));
+
+  const duplicatePost = await handleIpFeedbackPost(postRequest({
+    results: [{ address: "1.1.1.8", rtt: 7, ok: false }],
+  }), createEnv({ SPEED_DB: duplicate }));
+  assert.equal(duplicatePost.status, 200);
+  assert.equal(duplicate.rows[0].ok, 0);
+  const duplicateScores = (await loadIpScores({ SPEED_DB: duplicate })).scores;
+  assert.equal(duplicateScores.get("1.1.1.8").unreachable, true);
+
+  const broken = createMockD1();
+  const brokenPrepare = broken.prepare.bind(broken);
+  broken.prepare = (sql) => (/ALTER TABLE ip_feedback ADD COLUMN ok/.test(String(sql))
+    ? { run: async () => ({ success: false, error: "disk I/O error" }) }
+    : brokenPrepare(sql));
+
+  const brokenPost = await handleIpFeedbackPost(postRequest({
+    results: [{ address: "1.1.1.9", rtt: 7, ok: false }],
+  }), createEnv({ SPEED_DB: broken }));
+  assert.equal(brokenPost.status, 200);
+  assert.equal(broken.rows[0].ok, undefined);
+  const brokenScores = (await loadIpScores({ SPEED_DB: broken })).scores;
+  assert.equal(brokenScores.get("1.1.1.9").unreachable, false);
 });
 
 test("best reorders nodes by measured rtt and reports measurement count", async () => {

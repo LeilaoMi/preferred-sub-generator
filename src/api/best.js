@@ -20,9 +20,11 @@ export async function handleBest(request, env) {
   const { requested: requestedColos, colos } = parseColoFilter(rawColo, request);
 
   let nodes = allNodes;
+  let droppedUnreachable = 0;
   if (url.searchParams.get("rank") !== "off") {
     const { scores } = await loadIpScores(env);
     nodes = rankNodesByScore(nodes, scores);
+    droppedUnreachable = allNodes.length - nodes.length;
   }
   const filtered = filterNodesByColo(nodes, colos);
 
@@ -45,6 +47,7 @@ export async function handleBest(request, env) {
     total: filtered.nodes.length,
     version: version || "current",
     measured,
+    ...(droppedUnreachable > 0 ? { droppedUnreachable } : {}),
     ...(filterInfo ? { filter: filterInfo } : {}),
   });
 }

@@ -32,6 +32,7 @@
 - 节点名里出现 `28ms 实测` 时，COLO 和延迟来自**你本机的实测**（`scripts/probe-ips.js` 回传的数据），而不是美国扫描机看到的数字。
 - 订阅支持按线路过滤：`/sub?colo=HKG`、`/best?colo=auto`（`auto` = 你当前接入点），无匹配时自动回退全量，订阅不会变空。
 - 支持在本机探测每个候选 IP 的 TCP 握手延迟、落地 COLO 和下载带宽，回传 `/api/ip-feedback` 后订阅自动按你的实测结果重排——这是让代理真正变快的关键一步。
+- 本地探测默认用**订阅模板的域名**当探测 SNI（`--slot` 选账号槽位、`--sni` 覆盖），因此能识别出「IP 活着但不服务你的 zone」的 `error code: 1034` 节点；这类节点会带 `ok:false` 回传，订阅生成时自动剔除（失败多于成功才剔，剔完为空则回退全量）。
 - 首页状态卡显示「你的接入点」和「你的延迟」（你到 Cloudflare 边缘的真实 RTT，3 次取最小）。
 
 - 支持输出格式：
@@ -511,16 +512,19 @@ GET  /api/ip-feedback
 ```json
 {
   "results": [
-    { "address": "104.25.85.85", "port": 443, "rtt": 38.4, "colo": "HKG", "region": "HK", "speed": 42.1 }
+    { "address": "104.25.85.85", "port": 443, "rtt": 38.4, "colo": "HKG", "region": "HK", "speed": 42.1, "ok": true },
+    { "address": "108.162.192.1", "port": 443, "rtt": null, "colo": "", "ok": false }
   ]
 }
 ```
 
-`rtt` 是本机 TCP 握手延迟（毫秒，必填），`colo`/`region` 是连该 IP 时 `/cdn-cgi/trace` 返回的落地点，`speed` 是下载带宽 Mbps（可选）。单次最多 200 条，带基础频率限制，原始 IP 不落库（只存 SHA-256 哈希前缀以外的必要字段：地址本身是公开的 CF 边缘 IP，不是你的 IP）。存储优先写 D1 的 `ip_feedback` 表，未绑定 `SPEED_DB` 时回退 KV 的 `IP_FEEDBACK`（最多 500 条）。
+`rtt` 是本机 TCP 握手延迟（毫秒），`colo`/`region` 是连该 IP 时 `/cdn-cgi/trace` 返回的落地点，`speed` 是下载带宽 Mbps（可选）。单次最多 200 条，带基础频率限制，原始 IP 不落库（只存 SHA-256 哈希前缀以外的必要字段：地址本身是公开的 CF 边缘 IP，不是你的 IP）。存储优先写 D1 的 `ip_feedback` 表，未绑定 `SPEED_DB` 时回退 KV 的 `IP_FEEDBACK`（最多 500 条）。
 
-`GET` 需要管理 token，`?days=N`（默认 14、上限 90）返回按 IP 聚合的分数（`rtt` 平均值、`speed` 平均值、最新 `colo`、样本数）。
+`ok`（可选）表示这个 IP 在你那边**到底能不能用**：`true` = 连得上且对该域名返回可用回包；`false` = TCP 连不上，或者连上了但对该域名返回非 2xx（典型是 `error code: 1034` 这种「IP 活着但不服务你这个 zone」的边缘拦截）。`ok:false` 时 `rtt` 可以为 `null`（`colo` 也为空）；老数据没有 `ok` 字段，行为与旧版一致。
 
-`/sub` 与 `/best` 读取最近窗口内的实测数据重排节点：实测过的节点按实测 RTT 升序排前面，未实测的按原顺序跟在后面；`rank=off` 可关闭。数据全空时行为与旧版完全一致。
+`GET` 需要管理 token，`?days=N`（默认 14、上限 90）返回按 IP 聚合的分数（`rtt` 平均值、`speed` 平均值、最新 `colo`、样本数、`failed` 失败次数、`unreachable` 是否判定不可用）。
+
+`/sub` 与 `/best` 读取最近窗口内的实测数据重排节点：实测过的节点按实测 RTT 升序排前面，未实测的按原顺序跟在后面；`rank=off` 可关闭。被判定为 `unreachable`（失败次数多于成功次数）的 IP 会被直接剔除，`/best` 响应里的 `droppedUnreachable` 就是剔除数量；如果剔完一个不剩，自动回退全量，订阅不会变空。数据全空时行为与旧版完全一致。
 
 ### 模板配置
 
@@ -654,12 +658,16 @@ SUB_TOKEN=你的管理token SITE_URL=https://你的域名 node scripts/probe-ips
 --speed 5        每个 IP 下载测 5MB 再测带宽（默认 2，0 = 只测延迟）
 --colo auto      只探测你接入点的线路；或 --colo HKG,NRT
 --n 20           只测前 20 个候选
+--slot 2         用第 2 个账号槽位的模板当默认 SNI（1-5）
+--sni x.y.z      显式指定探测 SNI，优先级最高
 --concurrency 8  延迟探测并发（默认 8）
 --no-submit      只打印结果不回传
 --json out.json  额外把结果导出成 JSON
 ```
 
-脚本分两步：先并发测每个候选的 TCP 握手延迟和连该 IP 时的落地 COLO（`/cdn-cgi/trace`），再以并发 2 测下载带宽，最后打印排序结果并回传 `/api/ip-feedback`。
+**探测 SNI 默认取订阅模板的域名**（`--sni` 显式指定时优先，取不到模板才回退 `speed.cloudflare.com`）。这点很关键：Cloudflare 的 `error code: 1034` 是「这个 IP 活着，但不服务你的 zone」，只有用**你实际在用的那个域名**去连才暴露得出来；用 `speed.cloudflare.com` 测的话，这类 IP 照样是绿的。脚本启动时会打印它实际用的 SNI 和来源。
+
+脚本分两步：先并发测每个候选的 TCP 握手延迟和连该 IP 时的落地 COLO（`/cdn-cgi/trace`），再以并发 2 测下载带宽，最后打印排序结果并回传 `/api/ip-feedback`。**连不上的、或对该域名拿不到可用回包的 IP 会带 `ok:false` 一起回传**，服务端据此把它们从订阅里剔掉，不用你手动挑。
 
 ### 回传之后
 
@@ -687,6 +695,9 @@ npm run preflight
 - 候选源端到端（含 CF 官方 IPv6 源）
 - COLO 中文节点名
 - 访问控制
+- COLO 过滤与实测重排
+- IP 实测回传（含 `ok:false`）与不可用 IP 剔除
+- 候选扫描状态码校验（1034 不入选）
 - 部署前检查
 
 ## 上线后验证
@@ -719,6 +730,14 @@ curl -H "Authorization: Bearer 你的SUB_TOKEN" "https://你的域名/api/speedt
 ### v2rayNG 能导入，但真连接全是 -1
 
 先单独导入原始 VLESS 测试。如果原始 VLESS 不能用，生成后的优选订阅通常也不能用。
+
+### 连接报 `unexpected HTTP response status: 403` / `error code: 1034`
+
+Cloudflare 部分边缘 IP 只服务特定 zone：同一个 IP 用 `speed.cloudflare.com` 探测是 `200`，用你的模板域名（`host`/`sni`）探测却返回 `403` + `error code: 1034`。这种响应**同样带 `cf-ray`**，早期扫描只认 `cf-ray`、不看状态码，于是把它们当合格节点写进了 `BEST_IPS`——连上就是 403。
+
+扫描本身就用模板的 `host` 当 SNI 发 `GET /cdn-cgi/trace`（`scripts/update-kv.js`），现在 `checkHttpEdge` 会校验状态码：非 2xx 直接判为不可用，必须 `200` 才入选（`scripts/lib/check.js`）。`scripts/probe-ips.js` 走的是 trace 内容（必须有 `colo=`），本来就不受这个问题影响，现在还会把这类 IP 标成 `ok:false` 回传，`/sub` 和 `/best` 直接剔掉，不用等下一次扫描。
+
+手上已有旧批次的坏 IP：换一个节点即可，`1034` 的 IP 会在下一次扫描（每 6 小时）被剔除；或者在本机跑一次 `node scripts/probe-ips.js`，实测不通过的会立刻被订阅忽略。
 
 ### 为什么不支持 ProxyIP / 中转 IP？
 
