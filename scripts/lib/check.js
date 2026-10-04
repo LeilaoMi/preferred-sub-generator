@@ -45,6 +45,26 @@ function parseHeaders(buffer) {
   return headers;
 }
 
+function parseStatusCode(buffer) {
+  const match = String(buffer).match(/^HTTP\/1\.[01] (\d{3})/);
+  return match ? Number(match[1]) : 0;
+}
+
+// 边缘 IP 必须对该 zone 返回 2xx。Cloudflare 对“只服务部分 zone”的 IP 会返回
+// 403 + error code（如 1034），这类响应同样带 cf-ray，不能仅凭 cf-ray 判定可用。
+function isZoneServingResponse(buffer) {
+  const status = parseStatusCode(buffer);
+  if (status === 0) return true;
+  return status >= 200 && status < 300;
+}
+
+function edgeResult(buffer) {
+  if (!isZoneServingResponse(buffer)) return null;
+  const headers = parseHeaders(buffer);
+  const colo = parseCfRayColo(headers["cf-ray"]);
+  return { colo, edgeVerified: Boolean(colo) };
+}
+
 export function checkHttpEdge(address, port, { host, tlsEnabled, timeoutMs = 5000 } = {}) {
   return new Promise((resolve) => {
     const startedAt = Date.now();
@@ -72,18 +92,14 @@ export function checkHttpEdge(address, port, { host, tlsEnabled, timeoutMs = 500
     socket.on("data", (chunk) => {
       buffer += chunk.toString("utf8");
       if (buffer.includes("\r\n\r\n")) {
-        const headers = parseHeaders(buffer);
-        const colo = parseCfRayColo(headers["cf-ray"]);
-        finish({ colo, edgeVerified: Boolean(colo) });
+        finish(edgeResult(buffer));
       }
     });
     socket.once("timeout", () => finish(null));
     socket.once("error", () => finish(null));
     socket.once("end", () => {
       if (!done && buffer) {
-        const headers = parseHeaders(buffer);
-        const colo = parseCfRayColo(headers["cf-ray"]);
-        finish({ colo, edgeVerified: Boolean(colo) });
+        finish(edgeResult(buffer));
       }
     });
   });
