@@ -141,18 +141,3 @@ export function withPreferredPort(node) {
   const port = preferredPort(node);
   return port == null ? node : { ...node, port };
 }
-
-function verifiedPorts(node) {
-  return Array.isArray(node?.ports)
-    ? node.ports.map(Number).filter((port) => Number.isFinite(port) && port > 0)
-    : [];
-}
-
-// 探测旁路专用：在该 IP 全部过审的端口里按位置轮换，避免 50 条节点全钉在同一个端口上。
-// edgetunnel 自己那 16 个随机 IP 本来就是随机端口，这边轮换后整份合并名单的端口分布更散，
-// 单个端口的线路一坏也不至于整批一起死。
-export function withRotatedPort(node, index) {
-  const ports = verifiedPorts(node);
-  if (ports.length === 0) return node;
-  return { ...node, port: ports[index % ports.length] };
-}

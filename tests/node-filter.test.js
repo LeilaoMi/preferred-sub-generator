@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { filterNodesByColo, preferredPort, rankNodesByScore, sampleNodes, sampleWeight, withPreferredPort, withRotatedPort } from "../src/api/node-filter.js";
+import { filterNodesByColo, preferredPort, rankNodesByScore, sampleNodes, sampleWeight, withPreferredPort } from "../src/api/node-filter.js";
 
 const nodes = [
   { address: "1.1.1.1", port: 8443, colo: "LAX", latency: 20 },
@@ -57,17 +57,6 @@ test("withPreferredPort prefers 443 when the pool entry passed it", () => {
   assert.deepEqual(withPreferredPort({ address: "1.1.1.1", port: 2087, ports: [2087, 443] }), { address: "1.1.1.1", port: 443, ports: [2087, 443] });
   assert.equal(preferredPort({ address: "1.1.1.1", port: 2087, ports: [2087] }), 2087);
   assert.equal(withPreferredPort({ address: "1.1.1.1", port: 8443 }).port, 8443);
-});
-
-test("withRotatedPort cycles through all verified ports by position", () => {
-  const node = { address: "1.1.1.1", port: 443, ports: [443, 2087, 8443] };
-
-  assert.deepEqual(
-    [0, 1, 2, 3].map((index) => withRotatedPort(node, index).port),
-    [443, 2087, 8443, 443],
-  );
-  // 没有 ports 记录的旧池条目：保持原端口不动
-  assert.equal(withRotatedPort({ address: "2.2.2.2", port: 2087 }, 1).port, 2087);
 });
 
 test("sampled selection composes with colo bucket filter", () => {

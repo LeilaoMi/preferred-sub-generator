@@ -7,7 +7,7 @@ import { jsonResponse, privateTextResponse, unauthorizedResponse } from "../util
 import { formatEdgeNodeName } from "../utils/colo.js";
 import { loadIpScores } from "./ip-feedback.js";
 import { readBestIps, readTemplate } from "./kv.js";
-import { filterNodesByColo, parseColoFilter, rankNodesByScore, sampleNodes, withPreferredPort, withRotatedPort } from "./node-filter.js";
+import { filterNodesByColo, parseColoFilter, rankNodesByScore, sampleNodes, withPreferredPort } from "./node-filter.js";
 
 const MAX_NODES = 50;
 // 探测旁路给 edgetunnel 的数量：够轮换、够轻，16-30 是经验区间
@@ -87,10 +87,13 @@ export async function handleSub(request, env) {
   const probeSampling = edgeProbe || sampleMode;
   if (probeSampling) {
     // 抽样模式：池内先按落点分桶，再加权随机抽（实测只加权、不排名）。
+    // 端口统一走 443 优先：从国内运营商实测看，非标准端口（2053/2083/2087 等）
+    // 建连超时的概率明显高于 443，端口分散反而拉低了整批节点的可用率；
+    // IP 层面的多样性（每次抽不同的 30 个 IP）已经足够做故障隔离。
     nodes = sampleNodes(filterNodesByColo(nodes, colos).nodes, {
       limit: getLimit(url, edgeProbe ? PROBE_MAX_NODES : MAX_NODES),
       scores,
-    }).map((node, index) => (edgeProbe ? withRotatedPort(node, index) : withPreferredPort(node)));
+    }).map((node) => withPreferredPort(node));
   } else {
     nodes = filterNodesByColo(nodes, colos).nodes.slice(0, getLimit(url, MAX_NODES));
   }

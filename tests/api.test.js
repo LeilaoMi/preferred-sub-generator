@@ -143,7 +143,7 @@ test("sub sample mode applies to singbox with urltest outbound", async () => {
   assert.equal(first.server_port, 443);
 });
 
-test("edgetunnel probe gets sampled pool entries with rotated verified ports", async () => {
+test("edgetunnel probe prefers 443 on sampled nodes", async () => {
   const probe = new Request(
     "https://example.com/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000",
     { headers: { "User-Agent": "Mozilla/5.0 (compatible) edgetunnel/2.3.1" } },
@@ -156,26 +156,18 @@ test("edgetunnel probe gets sampled pool entries with rotated verified ports", a
   const lines = decoded.split("\n").filter(Boolean);
 
   assert.equal(lines.length, 3);
-  const poolPorts = { "1.1.1.1": [2087, 443], "1.1.1.2": [8443], "1.1.1.3": [443] };
+  const expectedPorts = { "1.1.1.1": 443, "1.1.1.2": 8443, "1.1.1.3": 443 };
   for (const line of lines) {
     assert.match(line, /00000000-0000-4000-8000-000000000000/);
     assert.match(line, /example\.com/);
     const matched = line.match(/@([^:/?#]+):(\d+)/);
     assert.ok(matched, line);
-    assert.ok(poolPorts[matched[1]].includes(Number(matched[2])), `unexpected port for ${matched[1]}: ${matched[2]}`);
+    // 443 优先：1.1.1.1 过审端口含 443 就必须发 443（国内运营商对 2053/2083 等非标准端口
+    // 建连超时的概率明显高于 443）；1.1.1.2 只过了 8443，保持原样
+    assert.equal(Number(matched[2]), expectedPorts[matched[1]], `unexpected port for ${matched[1]}`);
   }
   // 名称里不许出现美国测速机的延迟
   assert.doesNotMatch(decoded, /12ms|34ms|55ms/);
-
-  // 端口轮换：1.1.1.1 有两个过审端口，多次拉取应出现两种端口（edgetunnel 每次拉订阅都会来一次）
-  const portsSeen = new Set();
-  for (let attempt = 0; attempt < 12; attempt += 1) {
-    const attemptResponse = await handleSub(probe, createSampleEnv());
-    const attemptText = Buffer.from(await attemptResponse.text(), "base64").toString("utf8");
-    const line = attemptText.split("\n").find((item) => item.includes("@1.1.1.1:"));
-    portsSeen.add(line.match(/@1\.1\.1\.1:(\d+)/)[1]);
-  }
-  assert.ok(portsSeen.size > 1, `expected port rotation for 1.1.1.1, saw: ${[...portsSeen].join(",")}`);
 });
 
 test("edgetunnel probe caps sampled nodes at 30", async () => {

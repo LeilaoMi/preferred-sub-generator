@@ -21,7 +21,7 @@
 - 扫描只做"资格审查"，不发榜：GitHub Actions 用**你的模板域名**当 SNI 逐个直连候选 IP，要求返回 2xx（含 cf-ray）才算过审；过审结果按 IP 地址聚合为"过审池"写入 KV（单个 IP 记下全部过审端口，池上限 300）。官方网段每个 CIDR 抽 16 个样本。
 - 订阅有两种发法：默认是固定榜（历史行为）；`mode=sample` 是抽样模式——先按落点分桶，再从池里加权随机抽，每次拉取换一批，本地实测只提高被抽中权重、不再决定名次。
 - 抽样模式细节：节点端口优先 443；节点名不再印美国扫描机的延迟（有本地实测才标 `实测`）；Clash / Sing-box 输出附带自动测速组，客户端连接时自己挑活的。
-- edgetunnel 探测旁路每次从池里抽样 **30** 个 IP 发出去（edgetunnel 每次生成订阅都会来拉，天然轮换），端口在该 IP 全部过审的端口里轮换，避免整批钉死同一个端口。
+- edgetunnel 探测旁路每次从池里抽样 **30** 个 IP 发出去（edgetunnel 每次生成订阅都会来拉，天然轮换），端口走 443 优先（该 IP 过审端口含 443 就发 443；国内运营商对 2053/2083 等非标准端口建连超时的概率明显高于 443）。
 - 提供浏览器本地测速反馈面板：首页「开始测速」按钮在用户浏览器本地通过 Cloudflare 官方端点 `speed.cloudflare.com/__down` 实测下载速度，结果回传 `/api/speedtest-feedback` 存入 D1（未绑定时回退 KV），可用于验证国内真实访问质量；`/admin.html` 提供按天趋势面板。
 - `/status` 会标注测速地点（`speedtestLocation`，当前为 `GitHub Actions (US)`）、平均延迟（`averageLatency`）和平均带宽（`averageSpeed`；GitHub Actions 环境不做带宽测速，当前实际为 `null`，国内真实速度请用首页「开始测速」或本地探测脚本）。
 - 订阅节点名称支持中文友好 COLO 展示。默认（固定榜）例如：
@@ -119,7 +119,7 @@ KV 里 `BEST_IPS` 现在是过审 IP 池（按地址聚合，含各 IP 全部过
 /best?n=2&t=只读token           返回优选 IP JSON，HTTP 200，含 measured（实测节点数），带 colo= 时含 filter
 /best?n=2&t=只读token&rank=off   关闭按实测数据重排
 /api/ip-feedback                POST 需管理 token 回传逐 IP 实测；GET 需管理 token 查看聚合分数（默认统计 14 天）
-/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000  edgetunnel 探测旁路，免 token 返回占位 base64 订阅（UA 需含 edgetunnel）；每次从过审池抽样 30 个，端口轮换，名称不带美国延迟
+/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000  edgetunnel 探测旁路，免 token 返回占位 base64 订阅（UA 需含 edgetunnel）；每次从过审池抽样 30 个，端口 443 优先，名称不带美国延迟
 ```
 
 真实 token 只保存在 Cloudflare Pages 环境变量中，仓库不保存、不展示。首页在浏览器中请求 `/api/read-token` 时必须带上管理 token 才能换到 `SUB_READ_TOKEN`，换到后自动把 `t=只读token` 拼进订阅链接并存入 localStorage；匿名请求只能得到 `configured` 标记，拿不到 token 值。管理 token `SUB_TOKEN` 不会进入订阅 URL。
@@ -410,7 +410,7 @@ sub://your-domain.example.com
 
 本项目已内置 edgetunnel 探测旁路：当 `/sub` 收到同时满足 `host=example.com` + `uuid=全0` + UA 含 `edgetunnel` 的请求时，免只读 token 放行，返回 base64 编码的占位订阅——节点用占位 `uuid=00000000-...` 和 `host=example.com` 生成，**不会泄露真实 UUID / Host / SNI**。其它非探测请求仍必须带只读 token，私密模式不受影响。
 
-探测走抽样不走固定榜：每次从过审池里加权随机抽 **30** 个 IP（edgetunnel 每次生成订阅都会来拉一次，天然轮换），端口在该 IP 全部过审的端口里按位置轮换，节点名不带美国扫描机的延迟。edgetunnel 拿到后按自己的模板重新组装节点，你的池子只负责提供"验明正身过的 IP:端口"。
+探测走抽样不走固定榜：每次从过审池里加权随机抽 **30** 个 IP（edgetunnel 每次生成订阅都会来拉一次，天然轮换），端口走 443 优先，节点名不带美国扫描机的延迟。edgetunnel 拿到后按自己的模板重新组装节点，你的池子只负责提供"验明正身过的 IP:端口"。
 
 ### edgetunnel 2.0（zizifn 风格，直接给订阅 URL）
 
@@ -459,7 +459,7 @@ mode=sample 抽样模式：不发固定榜，从过审池里按落点分桶后�
 
 抽样模式（`mode=sample`）与默认发榜的区别：KV 里存的是检查过审的整个 IP 池（按地址聚合，含各 IP 通过的端口列表）。带 `mode=sample` 拉订阅时，每次请求从池里随机抽 `n` 个发，本地实测只提高被抽中的权重、不再决定名次；节点端口优先 443；节点名不再印 GitHub 机房测出的延迟（有本地实测才标 `实测`）；Clash / Sing-box 输出会附带自动测速分组，客户端连接时自己挑活的。去掉这个参数即回退旧的固定榜订阅，便于 A/B 和回滚。
 
-特殊：edgetunnel 探测旁路。当请求同时满足 `host=example.com` + `uuid=00000000-0000-4000-8000-000000000000` + UA 含 `edgetunnel` 时，`/sub` 免只读 token 放行，固定返回 base64 编码的占位订阅（占位 uuid/host，不泄露真实参数），用于对接 cmliu 版 edgetunnel 的 `sub://` 协议。探测不走固定榜：每次从过审池里加权随机抽一批 IP 发出去（edgetunnel 每次生成订阅都会来拉一次，天然轮换），端口在该 IP 全部过审的端口里按位置轮换（避免整批钉死同一个端口），名称不带美国测速延迟。详见「与 edgetunnel 配合」。
+特殊：edgetunnel 探测旁路。当请求同时满足 `host=example.com` + `uuid=00000000-0000-4000-8000-000000000000` + UA 含 `edgetunnel` 时，`/sub` 免只读 token 放行，固定返回 base64 编码的占位订阅（占位 uuid/host，不泄露真实参数），用于对接 cmliu 版 edgetunnel 的 `sub://` 协议。探测不走固定榜：每次从过审池里加权随机抽一批 IP 发出去（edgetunnel 每次生成订阅都会来拉一次，天然轮换），端口走 443 优先（国内运营商对非标准端口更易超时），名称不带美国测速延迟。详见「与 edgetunnel 配合」。
 
 ### 优选列表
 
@@ -712,9 +712,9 @@ npm run preflight
 - 访问控制
 - COLO 过滤与实测重排
 - 过审池聚合（按地址合并多端口、443 优先）与池上限
-- 加权随机抽样（含实测权重、不可用剔除、全死回退）与端口轮换
+- 加权随机抽样（含实测权重、不可用剔除、全死回退）与 443 优先
 - 抽样模式的自动测速分组（Clash url-test / Sing-box urltest+selector）
-- edgetunnel 探测旁路（抽样 30、端口轮换、名称去延迟）
+- edgetunnel 探测旁路（抽样 30、443 优先、名称去延迟）
 - IP 实测回传（含 `ok:false`）与不可用 IP 剔除
 - 候选扫描状态码校验（1034 不入选）
 - 部署前检查
