@@ -18,10 +18,13 @@
   - 本地手动源 `sources/edge/manual.txt`。
   - 可按需在 `sources/edge/remote.json` 自行添加 cmliu/amclubs 等社区源（注意区分 CF 边缘 IP 与中转 IP）。
 - 自动检测候选 IP 的可达性、延迟和 Cloudflare COLO。
-- 排序策略：**优先按带宽（speed）降序**，带宽数据来自 CSV 源的下载速度；无带宽数据的候选回退按延迟升序。国内访问场景下带宽比延迟更能反映实际体验。
+- 扫描只做"资格审查"，不发榜：GitHub Actions 用**你的模板域名**当 SNI 逐个直连候选 IP，要求返回 2xx（含 cf-ray）才算过审；过审结果按 IP 地址聚合为"过审池"写入 KV（单个 IP 记下全部过审端口，池上限 300）。官方网段每个 CIDR 抽 16 个样本。
+- 订阅有两种发法：默认是固定榜（历史行为）；`mode=sample` 是抽样模式——先按落点分桶，再从池里加权随机抽，每次拉取换一批，本地实测只提高被抽中权重、不再决定名次。
+- 抽样模式细节：节点端口优先 443；节点名不再印美国扫描机的延迟（有本地实测才标 `实测`）；Clash / Sing-box 输出附带自动测速组，客户端连接时自己挑活的。
+- edgetunnel 探测旁路每次从池里抽样 **30** 个 IP 发出去（edgetunnel 每次生成订阅都会来拉，天然轮换），端口在该 IP 全部过审的端口里轮换，避免整批钉死同一个端口。
 - 提供浏览器本地测速反馈面板：首页「开始测速」按钮在用户浏览器本地通过 Cloudflare 官方端点 `speed.cloudflare.com/__down` 实测下载速度，结果回传 `/api/speedtest-feedback` 存入 D1（未绑定时回退 KV），可用于验证国内真实访问质量；`/admin.html` 提供按天趋势面板。
 - `/status` 会标注测速地点（`speedtestLocation`，当前为 `GitHub Actions (US)`）、平均延迟（`averageLatency`）和平均带宽（`averageSpeed`；GitHub Actions 环境不做带宽测速，当前实际为 `null`，国内真实速度请用首页「开始测速」或本地探测脚本）。
-- 订阅节点名称支持中文友好 COLO 展示，例如：
+- 订阅节点名称支持中文友好 COLO 展示。默认（固定榜）例如：
 
 ```text
 🇺🇸 美国洛杉矶 LAX 12ms #1
@@ -29,9 +32,10 @@
 🇸🇬 新加坡 SIN 22ms #3
 ```
 
+抽样模式（`mode=sample`）下不再印美国扫描机的延迟，例如 `🇺🇸 美国洛杉矶 LAX #1`。
 - 节点名里出现 `28ms 实测` 时，COLO 和延迟来自**你本机的实测**（`scripts/probe-ips.js` 回传的数据），而不是美国扫描机看到的数字。
 - 订阅支持按线路过滤：`/sub?colo=HKG`、`/best?colo=auto`（`auto` = 你当前接入点），无匹配时自动回退全量，订阅不会变空。
-- 支持在本机探测每个候选 IP 的 TCP 握手延迟、落地 COLO 和下载带宽，回传 `/api/ip-feedback` 后订阅自动按你的实测结果重排——这是让代理真正变快的关键一步。
+- 支持在本机探测每个候选 IP 的 TCP 握手延迟、落地 COLO 和下载带宽，回传 `/api/ip-feedback` 后：默认订阅按你的实测结果重排，抽样模式下则按实测加权抽样——这是让代理真正变快的关键一步。
 - 本地探测默认用**订阅模板的域名**当探测 SNI（`--slot` 选账号槽位、`--sni` 覆盖），因此能识别出「IP 活着但不服务你的 zone」的 `error code: 1034` 节点；这类节点会带 `ok:false` 回传，订阅生成时自动剔除（失败多于成功才剔，剔完为空则回退全量）。
 - 首页状态卡显示「你的接入点」和「你的延迟」（你到 Cloudflare 边缘的真实 RTT，3 次取最小）。
 
@@ -95,12 +99,13 @@ Cloudflare Pages 是推荐部署方式，也是当前仓库实际验证的部署
 当前仓库已按 Cloudflare Pages 方式部署并验证。
 
 ```text
-生产自定义域名：https://your-domain.example.com
-Pages 项目名：your-pages-project
-最近验证预览：https://<deployment>.your-pages-project.pages.dev
+生产自定义域名：https://yxdy.woniu.bee.al
+Pages 项目名：preferred-sub-generator（见 wrangler.toml）
 KV 绑定变量：SUB_KV
 KV Namespace ID / D1 database_id：见 wrangler.toml（非密钥，可随仓库公开；真正的凭据只有环境变量里的 token）
 ```
+
+KV 里 `BEST_IPS` 现在是过审 IP 池（按地址聚合，含各 IP 全部过审端口，`ports` 字段），不再是固定的前 50 名榜单；`STATUS.available` 统计的是池大小。
 
 当前线上关键行为：
 
@@ -114,7 +119,7 @@ KV Namespace ID / D1 database_id：见 wrangler.toml（非密钥，可随仓库�
 /best?n=2&t=只读token           返回优选 IP JSON，HTTP 200，含 measured（实测节点数），带 colo= 时含 filter
 /best?n=2&t=只读token&rank=off   关闭按实测数据重排
 /api/ip-feedback                POST 需管理 token 回传逐 IP 实测；GET 需管理 token 查看聚合分数（默认统计 14 天）
-/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000  edgetunnel 探测旁路，免 token 返回占位 base64 订阅（UA 需含 edgetunnel）
+/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000  edgetunnel 探测旁路，免 token 返回占位 base64 订阅（UA 需含 edgetunnel）；每次从过审池抽样 30 个，端口轮换，名称不带美国延迟
 ```
 
 真实 token 只保存在 Cloudflare Pages 环境变量中，仓库不保存、不展示。首页在浏览器中请求 `/api/read-token` 时必须带上管理 token 才能换到 `SUB_READ_TOKEN`，换到后自动把 `t=只读token` 拼进订阅链接并存入 localStorage；匿名请求只能得到 `configured` 标记，拿不到 token 值。管理 token `SUB_TOKEN` 不会进入订阅 URL。
@@ -386,7 +391,7 @@ https://你的域名/
 cmliu 版 edgetunnel 用 `sub://` 协议对接外部"优选订阅生成器"。它的处理逻辑是：
 
 1. 把你填的 `sub://host...` 中的 `sub://` 换成 `https://`，并**丢弃 `#` 和 `?` 之后的所有内容**——所以你在 `sub://` 后面带的 `?t=`、`?type=` 都会被砍掉，不起作用。
-2. 自己拼一个固定探测请求：`https://host/sub?host=example.com&uuid=00000000-0000-4000-8000-8000-000000000000`，UA 含 `edgetunnel`。
+2. 自己拼一个固定探测请求：`https://host/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000`，UA 含 `edgetunnel`。
 3. 用 `atob()` 解码响应，识别其中带全 0 uuid + `example.com` 的行，提取 `域名:端口#备注` 作为优选 IP。
 
 因此对接这种 edgetunnel 时：
@@ -401,6 +406,8 @@ sub://your-domain.example.com
 - 不要加 `?t=` 或 `?type=`，加了也会被丢弃且无意义。
 
 本项目已内置 edgetunnel 探测旁路：当 `/sub` 收到同时满足 `host=example.com` + `uuid=全0` + UA 含 `edgetunnel` 的请求时，免只读 token 放行，返回 base64 编码的占位订阅——节点用占位 `uuid=00000000-...` 和 `host=example.com` 生成，**不会泄露真实 UUID / Host / SNI**。其它非探测请求仍必须带只读 token，私密模式不受影响。
+
+探测走抽样不走固定榜：每次从过审池里加权随机抽 **30** 个 IP（edgetunnel 每次生成订阅都会来拉一次，天然轮换），端口在该 IP 全部过审的端口里按位置轮换，节点名不带美国扫描机的延迟。edgetunnel 拿到后按自己的模板重新组装节点，你的池子只负责提供"验明正身过的 IP:端口"。
 
 ### edgetunnel 2.0（zizifn 风格，直接给订阅 URL）
 
@@ -527,7 +534,7 @@ GET  /api/ip-feedback
 
 `GET` 需要管理 token，`?days=N`（默认 14、上限 90）返回按 IP 聚合的分数（`rtt` 平均值、`speed` 平均值、最新 `colo`、样本数、`failed` 失败次数、`unreachable` 是否判定不可用）。
 
-`/sub` 与 `/best` 读取最近窗口内的实测数据重排节点：实测过的节点按实测 RTT 升序排前面，未实测的按原顺序跟在后面；`rank=off` 可关闭。被判定为 `unreachable`（失败次数多于成功次数）的 IP 会被直接剔除，`/best` 响应里的 `droppedUnreachable` 就是剔除数量；如果剔完一个不剩，自动回退全量，订阅不会变空。数据全空时行为与旧版完全一致。
+`/sub` 与 `/best` 读取最近窗口内的实测数据：默认按实测 RTT 升序重排节点（实测过的排前面，未实测的按原顺序跟在后面），`rank=off` 可关闭；`/sub?mode=sample` 下则改为加权随机抽样，实测好的 IP 更容易被抽中、不再垄断排序。被判定为 `unreachable`（失败次数多于成功次数）的 IP 会被直接剔除，`/best` 响应里的 `droppedUnreachable` 就是剔除数量；如果剔完一个不剩，自动回退全量，订阅不会变空。数据全空时行为与旧版完全一致。
 
 ### 模板配置
 
@@ -633,9 +640,11 @@ CIDR 源支持：
   "name": "cloudflare-official-v4",
   "url": "https://www.cloudflare.com/ips-v4/",
   "type": "text",
-  "cidrSamples": 4
+  "cidrSamples": 16
 }
 ```
+
+仓库自带的官方源两个都配了 `cidrSamples: 16`（每个 CIDR 抽 16 个样本进池）。
 
 ## 本地探测与线路过滤（按你的真实线路选 IP）
 
@@ -674,7 +683,7 @@ SUB_TOKEN=你的管理token SITE_URL=https://你的域名 node scripts/probe-ips
 
 ### 回传之后
 
-- `/sub` 和 `/best` 默认按实测 RTT 升序重排，实测过的节点排前面，节点名变成 `🇭🇰 香港 HKG 28ms 实测 #1` 这种——COLO 和延迟都来自你的实测。`rank=off` 可以关掉。
+- `/sub` 和 `/best` 默认按实测 RTT 升序重排，实测过的节点排前面，节点名变成 `🇭🇰 香港 HKG 28ms 实测 #1` 这种——COLO 和延迟都来自你的实测。`rank=off` 可以关掉；`mode=sample` 下实测只影响抽样权重。
 - 首页「线路过滤」填 `auto`（你的接入点）或 `HKG,NRT`，生成的订阅 URL 会自动带 `colo=`；过滤无匹配时回退全量，订阅不会变空。
 - 实测数据默认只统计最近 14 天；没有实测数据时，一切行为与旧版完全一致。
 
@@ -699,6 +708,10 @@ npm run preflight
 - COLO 中文节点名
 - 访问控制
 - COLO 过滤与实测重排
+- 过审池聚合（按地址合并多端口、443 优先）与池上限
+- 加权随机抽样（含实测权重、不可用剔除、全死回退）与端口轮换
+- 抽样模式的自动测速分组（Clash url-test / Sing-box urltest+selector）
+- edgetunnel 探测旁路（抽样 30、端口轮换、名称去延迟）
 - IP 实测回传（含 `ok:false`）与不可用 IP 剔除
 - 候选扫描状态码校验（1034 不入选）
 - 部署前检查
