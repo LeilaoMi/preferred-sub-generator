@@ -126,11 +126,13 @@ KV 里 `BEST_IPS` 现在是过审 IP 池（按地址聚合，含各 IP 全部过
 
 ### 可配合 GitHub Actions
 
-GitHub Actions 不负责部署页面，它负责定时刷新 KV：
+`.github/workflows/update.yml` 每 6 小时定时刷新 KV（不负责部署页面）：
 
 ```text
 抓取候选源 → 检测可用 CF Edge → 写入 BEST_IPS 和 STATUS
 ```
+
+`.github/workflows/deploy-pages.yml` 在 push 到 `main` 时自动部署到 Cloudflare Pages（`wrangler pages deploy public`，用仓库 Secrets 里的 `CLOUDFLARE_API_TOKEN_2` / `CLOUDFLARE_ACCOUNT_ID`）。改完代码 push 即可上线，不用再手动跑 wrangler。
 
 真实 VLESS 模板不放 GitHub Secrets。Actions 会读取 Cloudflare KV 中已保存的 `TEMPLATE`。
 
@@ -146,6 +148,7 @@ GitHub Actions 不负责部署页面，它负责定时刷新 KV：
 
 ```text
 .github/workflows/update.yml     GitHub Actions 定时刷新 KV
+.github/workflows/deploy-pages.yml  push 到 main 自动部署到 Cloudflare Pages
 public/index.html                中文首页，粘贴 VLESS 并生成订阅
 public/admin.html                私用模板配置页
 functions/sub.js                 订阅接口
