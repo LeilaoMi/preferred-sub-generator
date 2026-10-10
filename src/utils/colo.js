@@ -54,14 +54,15 @@ function shouldKeepName(name) {
   return name && !String(name).startsWith("CF Edge ");
 }
 
-export function formatEdgeNodeName(node, index) {
+export function formatEdgeNodeName(node, index, options = {}) {
   const measured = node.userRtt != null && Number.isFinite(Number(node.userRtt))
     ? Math.round(Number(node.userRtt))
     : null;
-  if (measured === null && shouldKeepName(node.name)) return node.name;
+  // 抽样模式下节点名不再沿用存量名称（其中嵌着美国测速机的延迟），改为按落点现生成
+  if (measured === null && !options.hideLatency && shouldKeepName(node.name)) return node.name;
   const location = formatColo(node.userColo || node.colo) || "🌐 未识别地区";
   const latency = measured !== null
     ? ` ${measured}ms 实测`
-    : (Number.isFinite(Number(node.latency)) ? ` ${node.latency}ms` : "");
+    : (options.hideLatency ? "" : (Number.isFinite(Number(node.latency)) ? ` ${node.latency}ms` : ""));
   return `${location}${latency} #${index + 1}`;
 }

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { checkCandidates, parseCfRayColo } from "../scripts/lib/check.js";
 import { collectCandidates, collectCandidatesWithHealth, expandIPv4Cidr, expandIPv6Cidr, parseCandidate, uniqueCandidates } from "../scripts/lib/candidates.js";
 import { deleteKvValue, readKvValue, writeKvValue } from "../scripts/lib/kv.js";
-import { buildUpdatePayload } from "../scripts/update-kv.js";
+import { aggregateCheckedResults, buildUpdatePayload } from "../scripts/update-kv.js";
 
 test("parse candidates from IP, host:port and URL", () => {
   assert.deepEqual(parseCandidate("1.1.1.1"), { address: "1.1.1.1", port: null });
@@ -161,7 +161,22 @@ test("check candidates can require Cloudflare ray verification", async () => {
   assert.deepEqual(result, []);
 });
 
-test("build update payload keeps top 50 checked nodes with colo names", async () => {
+test("aggregate checked results groups ports per address and prefers 443", () => {
+  const pooled = aggregateCheckedResults([
+    { address: "1.1.1.1", port: 8443, latency: 9, colo: "LAX", edgeVerified: true, source: "s" },
+    { address: "1.1.1.1", port: 443, latency: 30, colo: "LAX", edgeVerified: true, source: "s" },
+    { address: "2.2.2.2", port: 2087, latency: 12, colo: "SJC", edgeVerified: false, source: "s" },
+  ]);
+
+  assert.equal(pooled.length, 2);
+  assert.equal(pooled[0].port, 443);
+  assert.deepEqual(pooled[0].ports, [443, 8443]);
+  assert.equal(pooled[0].latency, 30);
+  assert.equal(pooled[0].edgeVerified, true);
+  assert.deepEqual(pooled[1].ports, [2087]);
+});
+
+test("build update payload stores pooled checked nodes with colo names", async () => {
   const payload = await buildUpdatePayload({
     originalNode: "vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=tls&sni=example.com&type=ws&host=example.com&path=%2Fws#原始节点",
     manualText: Array.from({ length: 60 }, (_, index) => `1.1.1.${index + 1}`).join("\n"),
@@ -173,13 +188,15 @@ test("build update payload keeps top 50 checked nodes with colo names", async ()
   const status = JSON.parse(payload.STATUS);
 
   assert.equal(payload.TEMPLATE.startsWith("vless://"), true);
-  assert.equal(bestIps.length, 50);
+  assert.equal(bestIps.length, 60);
   assert.equal(bestIps[0].address, "1.1.1.1");
+  assert.equal(bestIps[0].port, 443);
+  assert.deepEqual(bestIps[0].ports, [443, 2053, 2083, 2087, 2096, 8443]);
   assert.equal(bestIps[0].name, "🇺🇸 美国洛杉矶 LAX 1ms #1");
   assert.equal(bestIps[0].colo, "LAX");
   assert.equal(bestIps[0].speed, null);
   assert.equal(status.updatedAt, "2026-06-03T00:00:00.000Z");
-  assert.equal(status.available, 50);
+  assert.equal(status.available, 60);
   assert.equal(status.protectedByPrevious, false);
   assert.equal(status.requireCfRay, true);
   assert.equal(status.allowTcpOnly, false);
@@ -187,10 +204,25 @@ test("build update payload keeps top 50 checked nodes with colo names", async ()
   assert.equal(JSON.parse(payload.SOURCE_HEALTH).length, 1);
   assert.equal(payload.LAST_RUN_AT, "2026-06-03T00:00:00.000Z");
   assert.equal(payload.LAST_RUN_OK, "true");
-  assert.equal(payload.LAST_RUN_AVAILABLE, "50");
-  assert.equal(JSON.parse(payload.BEST_IPS_LAST).length, 50);
+  assert.equal(payload.LAST_RUN_AVAILABLE, "60");
+  assert.equal(JSON.parse(payload.BEST_IPS_LAST).length, 60);
   assert.equal(JSON.parse(payload.BEST_IPS_TREND).length, 1);
-  assert.equal(status.available, 50);
+  assert.equal(status.available, 60);
+});
+
+test("build update payload caps pool size by poolLimit", async () => {
+  const payload = await buildUpdatePayload({
+    originalNode: "vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=tls&sni=example.com&type=ws&host=example.com&path=%2Fws#原始节点",
+    manualText: Array.from({ length: 10 }, (_, index) => `1.1.1.${index + 1}`).join("\n"),
+    remoteSources: [],
+    poolLimit: 3,
+    checkOne: async (address) => ({ latency: Number(address.split(".").at(-1)), colo: "LAX", edgeVerified: true }),
+    now: new Date("2026-06-03T00:00:00.000Z"),
+  });
+  const bestIps = JSON.parse(payload.BEST_IPS);
+
+  assert.equal(bestIps.length, 3);
+  assert.deepEqual(bestIps.map((item) => item.address), ["1.1.1.1", "1.1.1.2", "1.1.1.3"]);
 });
 
 test("build update payload records speed when CSV source provides bandwidth", async () => {
@@ -232,8 +264,9 @@ test("build update payload keeps previous nodes when new result is too small", a
 
   assert.deepEqual(bestIps, previousBestIps);
   assert.equal(status.available, 1);
-  assert.equal(status.newAvailable, 6);
-  assert.equal(status.lastRawAvailable, 6);
+  // 新口径按地址计：一台 IP 多个端口只算一个池成员
+  assert.equal(status.newAvailable, 1);
+  assert.equal(status.lastRawAvailable, 1);
   assert.equal(status.consecutiveFallbacks, 3);
   assert.equal(status.lastSuccessfulRefreshAt, "2026-06-02T00:00:00.000Z");
   assert.equal(status.protectedByPrevious, true);

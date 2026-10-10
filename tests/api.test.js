@@ -93,6 +93,131 @@ test("sub generates Clash subscription", async () => {
   assert.doesNotMatch(text, /1\.1\.1\.3/);
 });
 
+function createSampleEnv() {
+  const pool = [
+    { address: "1.1.1.1", port: 2087, ports: [2087, 443], name: "🇺🇸 美国洛杉矶 LAX 12ms #1", colo: "LAX", latency: 12 },
+    { address: "1.1.1.2", port: 8443, ports: [8443], name: "🇺🇸 美国圣何塞 SJC 34ms #2", colo: "SJC", latency: 34 },
+    { address: "1.1.1.3", port: 443, ports: [443], name: "优选-3", colo: "HKG", latency: 55 },
+  ];
+  const data = new Map([
+    ["TEMPLATE", template],
+    ["BEST_IPS", JSON.stringify(pool)],
+    ["STATUS", JSON.stringify(status)],
+  ]);
+  return {
+    SUB_TOKEN: "secret-token",
+    SUB_READ_TOKEN: "read-token",
+    SUB_KV: {
+      async get(key) {
+        return data.get(key) || null;
+      },
+      put(key, value) {
+        data.set(key, value);
+      },
+    },
+  };
+}
+
+test("sub sample mode prefers 443 and hides upstream latency in names", async () => {
+  const response = await handleSub(subRequest("/sub?type=clash&mode=sample&n=3"), createSampleEnv());
+  const text = await response.text();
+
+  assert.equal(response.status, 200);
+  // 1.1.1.1 过审端口含 443 时必须发 443，而不是 KV 里存的 2087
+  assert.match(text, /server: "1\.1\.1\.1"[\s\S]*?port: 443/);
+  // 名称不再带美国测速机的延迟（12ms/34ms/55ms 都不许出现）
+  assert.doesNotMatch(text, /12ms|34ms|55ms/);
+  assert.match(text, /🇺🇸 美国洛杉矶 LAX #\d/);
+  // 抽样模式带自动测速组；旧模式不带
+  assert.match(text, /type: url-test/);
+});
+
+test("sub sample mode applies to singbox with urltest outbound", async () => {
+  const response = await handleSub(subRequest("/sub?type=singbox&mode=sample&n=3"), createSampleEnv());
+  const parsed = JSON.parse(await response.text());
+
+  assert.equal(response.status, 200);
+  assert.equal(parsed.outbounds[0].type, "urltest");
+  assert.equal(parsed.outbounds[1].type, "selector");
+  const first = parsed.outbounds.find((outbound) => outbound.server === "1.1.1.1");
+  assert.equal(first.server_port, 443);
+});
+
+test("edgetunnel probe gets sampled pool entries with rotated verified ports", async () => {
+  const probe = new Request(
+    "https://example.com/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000",
+    { headers: { "User-Agent": "Mozilla/5.0 (compatible) edgetunnel/2.3.1" } },
+  );
+
+  // 免只读 token（探测旁路签名）
+  const response = await handleSub(probe, createSampleEnv());
+  assert.equal(response.status, 200);
+  const decoded = Buffer.from(await response.text(), "base64").toString("utf8");
+  const lines = decoded.split("\n").filter(Boolean);
+
+  assert.equal(lines.length, 3);
+  const poolPorts = { "1.1.1.1": [2087, 443], "1.1.1.2": [8443], "1.1.1.3": [443] };
+  for (const line of lines) {
+    assert.match(line, /00000000-0000-4000-8000-000000000000/);
+    assert.match(line, /example\.com/);
+    const matched = line.match(/@([^:/?#]+):(\d+)/);
+    assert.ok(matched, line);
+    assert.ok(poolPorts[matched[1]].includes(Number(matched[2])), `unexpected port for ${matched[1]}: ${matched[2]}`);
+  }
+  // 名称里不许出现美国测速机的延迟
+  assert.doesNotMatch(decoded, /12ms|34ms|55ms/);
+
+  // 端口轮换：1.1.1.1 有两个过审端口，多次拉取应出现两种端口（edgetunnel 每次拉订阅都会来一次）
+  const portsSeen = new Set();
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const attemptResponse = await handleSub(probe, createSampleEnv());
+    const attemptText = Buffer.from(await attemptResponse.text(), "base64").toString("utf8");
+    const line = attemptText.split("\n").find((item) => item.includes("@1.1.1.1:"));
+    portsSeen.add(line.match(/@1\.1\.1\.1:(\d+)/)[1]);
+  }
+  assert.ok(portsSeen.size > 1, `expected port rotation for 1.1.1.1, saw: ${[...portsSeen].join(",")}`);
+});
+
+test("edgetunnel probe caps sampled nodes at 30", async () => {
+  const pool = Array.from({ length: 40 }, (_, index) => ({
+    address: `10.0.0.${index + 1}`,
+    port: 443,
+    ports: [443],
+    colo: "LAX",
+    latency: 10,
+  }));
+  const data = new Map([
+    ["TEMPLATE", template],
+    ["BEST_IPS", JSON.stringify(pool)],
+    ["STATUS", JSON.stringify(status)],
+  ]);
+  const env = {
+    SUB_TOKEN: "secret-token",
+    SUB_READ_TOKEN: "read-token",
+    SUB_KV: { async get(key) { return data.get(key) || null; }, put(key, value) { data.set(key, value); } },
+  };
+  const probe = new Request(
+    "https://example.com/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000",
+    { headers: { "User-Agent": "edgetunnel/2.3.1" } },
+  );
+
+  const response = await handleSub(probe, env);
+  const decoded = Buffer.from(await response.text(), "base64").toString("utf8");
+  assert.equal(decoded.split("\n").filter(Boolean).length, 30);
+});
+
+test("sub sample mode rotates subsets across requests", async () => {
+  const seen = new Set();
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    const response = await handleSub(subRequest("/sub?type=vless&mode=sample&n=1"), createSampleEnv());
+    const text = await response.text();
+    seen.add(text.match(/@(1\.1\.1\.\d):/)?.[1]);
+  }
+
+  // 12 次各抽 1 个，若还是固定榜首永远只会见到同一个地址
+  assert.ok(seen.size > 1, `expected rotation across requests, saw: ${[...seen].join(",")}`);
+});
+
 test("sub generates plain VLESS subscription with encoded generated names", async () => {
   const response = await handleSub(subRequest("/sub?type=vless&n=1"), createEnv());
   const text = await response.text();

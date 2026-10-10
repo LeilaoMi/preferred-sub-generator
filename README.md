@@ -444,9 +444,12 @@ slot=1      使用 TEMPLATE_1 模板槽位，template 的别名
 wrap=76     v2rayNG/base64 输出按固定宽度换行，兼容老客户端/复制场景
 colo=HKG    只保留该线路节点，逗号分隔多个；auto = 你的接入点；无匹配回退全量
 rank=off    关闭按本地实测数据重排（默认开启）
+mode=sample 抽样模式：不发固定榜，从过审池里按落点分桶后加权随机抽（见下）
 ```
 
-特殊：edgetunnel 探测旁路。当请求同时满足 `host=example.com` + `uuid=00000000-0000-4000-8000-000000000000` + UA 含 `edgetunnel` 时，`/sub` 免只读 token 放行，固定返回 base64 编码的占位订阅（占位 uuid/host，不泄露真实参数），用于对接 cmliu 版 edgetunnel 的 `sub://` 协议。详见「与 edgetunnel 配合」。
+抽样模式（`mode=sample`）与默认发榜的区别：KV 里存的是检查过审的整个 IP 池（按地址聚合，含各 IP 通过的端口列表）。带 `mode=sample` 拉订阅时，每次请求从池里随机抽 `n` 个发，本地实测只提高被抽中的权重、不再决定名次；节点端口优先 443；节点名不再印 GitHub 机房测出的延迟（有本地实测才标 `实测`）；Clash / Sing-box 输出会附带自动测速分组，客户端连接时自己挑活的。去掉这个参数即回退旧的固定榜订阅，便于 A/B 和回滚。
+
+特殊：edgetunnel 探测旁路。当请求同时满足 `host=example.com` + `uuid=00000000-0000-4000-8000-000000000000` + UA 含 `edgetunnel` 时，`/sub` 免只读 token 放行，固定返回 base64 编码的占位订阅（占位 uuid/host，不泄露真实参数），用于对接 cmliu 版 edgetunnel 的 `sub://` 协议。探测不走固定榜：每次从过审池里加权随机抽一批 IP 发出去（edgetunnel 每次生成订阅都会来拉一次，天然轮换），端口在该 IP 全部过审的端口里按位置轮换（避免整批钉死同一个端口），名称不带美国测速延迟。详见「与 edgetunnel 配合」。
 
 ### 优选列表
 

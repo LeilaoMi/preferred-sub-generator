@@ -30,18 +30,41 @@ function buildProxy(template, override, index) {
   return { name, yaml: lines.join("\n") };
 }
 
-export function generateClashSubscription(template, nodes) {
+export function generateClashSubscription(template, nodes, options = {}) {
   const proxies = nodes.map((node, index) => buildProxy(template, node, index));
   const names = proxies.map((proxy) => `      - ${yamlString(proxy.name)}`).join("\n");
+
+  const groups = [];
+  if (options.autoTest && proxies.length > 0) {
+    // 抽样模式：客户端连接时自己测速挑活的，坏节点几秒内被跳过
+    groups.push(
+      "  - name: \"自动测速\"",
+      "    type: url-test",
+      "    url: \"http://www.gstatic.com/generate_204\"",
+      "    interval: 300",
+      "    tolerance: 80",
+      "    proxies:",
+      names,
+      "  - name: \"优选自动\"",
+      "    type: select",
+      "    proxies:",
+      "      - \"自动测速\"",
+      names,
+    );
+  } else {
+    groups.push(
+      "  - name: \"优选自动\"",
+      "    type: select",
+      "    proxies:",
+      names,
+    );
+  }
 
   return [
     "proxies:",
     proxies.map((proxy) => proxy.yaml).join("\n"),
     "proxy-groups:",
-    "  - name: \"优选自动\"",
-    "    type: select",
-    "    proxies:",
-    names,
+    ...groups,
     "rules:",
     "  - MATCH,优选自动",
     "",

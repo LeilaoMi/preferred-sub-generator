@@ -46,6 +46,31 @@ test("generate Sing-box subscription", () => {
   assert.equal(parsed.outbounds[0].tls.server_name, "example.com");
 });
 
+test("generate Clash subscription with autoTest adds url-test group (sample mode)", () => {
+  const output = generateClashSubscription(template, nodes, { autoTest: true });
+
+  assert.match(output, /name: "自动测速"/);
+  assert.match(output, /type: url-test/);
+  assert.match(output, /generate_204/);
+  assert.match(output, /- "自动测速"/);
+  assert.match(output, /MATCH,优选自动/);
+  // 非抽样模式不出现测速组，旧行为不变
+  assert.doesNotMatch(generateClashSubscription(template, nodes), /url-test/);
+});
+
+test("generate Sing-box subscription with autoTest adds urltest and selector (sample mode)", () => {
+  const parsed = JSON.parse(generateSingboxSubscription(template, nodes, { autoTest: true }));
+
+  assert.equal(parsed.outbounds.length, 4);
+  assert.equal(parsed.outbounds[0].type, "urltest");
+  assert.equal(parsed.outbounds[0].tag, "自动测速");
+  assert.deepEqual(parsed.outbounds[0].outbounds, ["优选-1", "优选-2"]);
+  assert.equal(parsed.outbounds[1].type, "selector");
+  assert.equal(parsed.outbounds[1].default, "自动测速");
+  // 非抽样模式只有节点出站，旧行为不变
+  assert.equal(JSON.parse(generateSingboxSubscription(template, nodes)).outbounds.length, 2);
+});
+
 test("generate Shadowrocket subscription", () => {
   const output = generateShadowrocketSubscription(template, nodes);
   const lines = output.split("\n");

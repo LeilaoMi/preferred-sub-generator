@@ -45,6 +45,18 @@ function round(value, digits) {
   return Math.round(value * factor) / factor;
 }
 
+export function decorateMeasured(node, score) {
+  const rtt = Number(score?.rtt);
+  if (!score || score.unreachable || !Number.isFinite(rtt)) return node;
+  return {
+    ...node,
+    userRtt: round(rtt, 1),
+    userColo: score.colo || undefined,
+    userSpeed: score.speed != null && Number.isFinite(Number(score.speed)) ? round(Number(score.speed), 2) : undefined,
+    userSamples: Number.isFinite(Number(score.samples)) ? Number(score.samples) : undefined,
+  };
+}
+
 export function rankNodesByScore(nodes, scores) {
   const list = Array.isArray(nodes) ? nodes : [];
   if (!scores || scores.size === 0) return list;
@@ -72,13 +84,75 @@ export function rankNodesByScore(nodes, scores) {
     || (a.index - b.index));
 
   return [
-    ...measured.map(({ node, score, rtt }) => ({
-      ...node,
-      userRtt: round(rtt, 1),
-      userColo: score.colo || undefined,
-      userSpeed: score.speed != null && Number.isFinite(Number(score.speed)) ? round(Number(score.speed), 2) : undefined,
-      userSamples: Number.isFinite(Number(score.samples)) ? Number(score.samples) : undefined,
-    })),
+    ...measured.map(({ node, score }) => decorateMeasured(node, score)),
     ...rest,
   ];
+}
+
+export function sampleWeight(node, score) {
+  let weight = 1;
+  if (score && !score.unreachable) {
+    const rtt = Number(score.rtt);
+    if (Number.isFinite(rtt)) weight += Math.min(2, 150 / Math.max(rtt, 30));
+    const speed = Number(score.speed);
+    if (Number.isFinite(speed)) weight += Math.min(1, speed / 25);
+  }
+  return weight;
+}
+
+export function sampleNodes(nodes, { limit, scores, random = Math.random } = {}) {
+  const list = Array.isArray(nodes) ? nodes : [];
+
+  // 与排名模式相同口径：本地实测判死的剔除；若全部判死则保留全量，避免订阅被清空
+  let base = list;
+  if (scores && scores.size > 0) {
+    const filtered = list.filter((node) => scores.get(node?.address)?.unreachable !== true);
+    if (filtered.length > 0) base = filtered;
+  }
+
+  const cap = Number.isFinite(Number(limit)) && Number(limit) > 0
+    ? Math.min(Number(limit), base.length)
+    : base.length;
+
+  // Efraimidis–Spirakis 加权不放回抽样：key = random^(1/weight)，权重越高越容易排前面。
+  // 本地实测只抬高被抽中的概率，不决定入选资格——实测是加权参考，不是排行榜。
+  const keyed = base.map((node) => {
+    const score = scores?.get(node?.address);
+    const weight = sampleWeight(node, score);
+    const draw = Number(random());
+    const safe = Number.isFinite(draw) ? Math.min(Math.max(draw, Number.EPSILON), 1 - Number.EPSILON) : 0.5;
+    return { node: decorateMeasured(node, score), key: Math.pow(safe, 1 / weight) };
+  });
+
+  keyed.sort((a, b) => b.key - a.key);
+  return keyed.slice(0, cap).map((entry) => entry.node);
+}
+
+export function preferredPort(node) {
+  const ports = Array.isArray(node?.ports)
+    ? node.ports.map(Number).filter((port) => Number.isFinite(port) && port > 0)
+    : [];
+  if (ports.includes(443)) return 443;
+  if (node?.port != null && Number.isFinite(Number(node.port))) return Number(node.port);
+  return ports[0] ?? null;
+}
+
+export function withPreferredPort(node) {
+  const port = preferredPort(node);
+  return port == null ? node : { ...node, port };
+}
+
+function verifiedPorts(node) {
+  return Array.isArray(node?.ports)
+    ? node.ports.map(Number).filter((port) => Number.isFinite(port) && port > 0)
+    : [];
+}
+
+// 探测旁路专用：在该 IP 全部过审的端口里按位置轮换，避免 50 条节点全钉在同一个端口上。
+// edgetunnel 自己那 16 个随机 IP 本来就是随机端口，这边轮换后整份合并名单的端口分布更散，
+// 单个端口的线路一坏也不至于整批一起死。
+export function withRotatedPort(node, index) {
+  const ports = verifiedPorts(node);
+  if (ports.length === 0) return node;
+  return { ...node, port: ports[index % ports.length] };
 }

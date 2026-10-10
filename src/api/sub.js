@@ -7,9 +7,11 @@ import { jsonResponse, privateTextResponse, unauthorizedResponse } from "../util
 import { formatEdgeNodeName } from "../utils/colo.js";
 import { loadIpScores } from "./ip-feedback.js";
 import { readBestIps, readTemplate } from "./kv.js";
-import { filterNodesByColo, parseColoFilter, rankNodesByScore } from "./node-filter.js";
+import { filterNodesByColo, parseColoFilter, rankNodesByScore, sampleNodes, withPreferredPort, withRotatedPort } from "./node-filter.js";
 
 const MAX_NODES = 50;
+// 探测旁路给 edgetunnel 的数量：够轮换、够轻，16-30 是经验区间
+const PROBE_MAX_NODES = 30;
 
 const EDGE_PROBE_UUID = "00000000-0000-4000-8000-000000000000";
 
@@ -35,12 +37,12 @@ function getLimit(url, total) {
   return Math.min(requested, MAX_NODES, total);
 }
 
-function normalizeNodes(nodes) {
-  return nodes.map((node, index) => ({ ...node, name: formatEdgeNodeName(node, index) }));
+function normalizeNodes(nodes, options) {
+  return nodes.map((node, index) => ({ ...node, name: formatEdgeNodeName(node, index, options) }));
 }
 
-function generateVlessSubscription(template, nodes) {
-  return normalizeNodes(nodes).map((node) => generateVlessUri(template, node)).join("\n");
+function generateVlessSubscription(template, nodes, options) {
+  return normalizeNodes(nodes, options).map((node) => generateVlessUri(template, node)).join("\n");
 }
 
 
@@ -71,14 +73,29 @@ export async function handleSub(request, env) {
   if (!auth.authorized) return unauthorizedResponse();
 
   const type = edgeProbe ? "base64" : (url.searchParams.get("type") || "vless").toLowerCase();
+  const sampleMode = url.searchParams.get("mode") === "sample";
   const template = await readTemplate(env.SUB_KV, templateKeyFromUrl(url));
   const { colos } = parseColoFilter(url.searchParams.get("colo"), request);
   let nodes = await readBestIps(env.SUB_KV);
+  let scores = null;
   if (url.searchParams.get("rank") !== "off") {
-    const { scores } = await loadIpScores(env);
-    nodes = rankNodesByScore(nodes, scores);
+    ({ scores } = await loadIpScores(env));
+    if (!sampleMode) nodes = rankNodesByScore(nodes, scores);
   }
-  nodes = filterNodesByColo(nodes, colos).nodes.slice(0, getLimit(url, MAX_NODES));
+  // edgetunnel 探测旁路拼的 URL 不带 mode 参数，但它要的正是"每次来都换一批 IP"的效果，
+  // 所以探测直接走抽样（普通订阅不带 mode=sample 时仍维持旧的固定榜，可随时回滚）。
+  const probeSampling = edgeProbe || sampleMode;
+  if (probeSampling) {
+    // 抽样模式：池内先按落点分桶，再加权随机抽（实测只加权、不排名）。
+    nodes = sampleNodes(filterNodesByColo(nodes, colos).nodes, {
+      limit: getLimit(url, edgeProbe ? PROBE_MAX_NODES : MAX_NODES),
+      scores,
+    }).map((node, index) => (edgeProbe ? withRotatedPort(node, index) : withPreferredPort(node)));
+  } else {
+    nodes = filterNodesByColo(nodes, colos).nodes.slice(0, getLimit(url, MAX_NODES));
+  }
+  const nameOptions = probeSampling ? { hideLatency: true } : undefined;
+  const generatorOptions = { autoTest: sampleMode };
 
   if (nodes.length === 0) {
     return jsonResponse(errorPayload("NO_AVAILABLE_NODES", "No available nodes"), 503);
@@ -86,29 +103,29 @@ export async function handleSub(request, env) {
 
   if (edgeProbe) {
     const probeTemplate = { ...template, uuid: EDGE_PROBE_UUID, host: "example.com", sni: "example.com", path: "/" };
-    return privateTextResponse(base64Encode(generateVlessSubscription(probeTemplate, nodes)), "text/plain; charset=utf-8", subscriptionHeaders("preferred-sub-edge.txt"));
+    return privateTextResponse(base64Encode(generateVlessSubscription(probeTemplate, nodes, nameOptions)), "text/plain; charset=utf-8", subscriptionHeaders("preferred-sub-edge.txt"));
   }
 
   if (type === "vless") {
-    return privateTextResponse(generateVlessSubscription(template, nodes), "text/plain; charset=utf-8", subscriptionHeaders("preferred-sub.txt"));
+    return privateTextResponse(generateVlessSubscription(template, nodes, nameOptions), "text/plain; charset=utf-8", subscriptionHeaders("preferred-sub.txt"));
   }
 
   if (type === "v2rayng" || type === "base64") {
     const wrap = Number(url.searchParams.get("wrap") || 0);
-    const encoded = wrapText(base64Encode(generateVlessSubscription(template, nodes)), wrap);
+    const encoded = wrapText(base64Encode(generateVlessSubscription(template, nodes, nameOptions)), wrap);
     return privateTextResponse(encoded, "text/plain; charset=utf-8", subscriptionHeaders("preferred-sub-base64.txt"));
   }
 
   if (type === "shadowrocket") {
-    return privateTextResponse(generateShadowrocketSubscription(template, normalizeNodes(nodes)), "text/plain; charset=utf-8", subscriptionHeaders("preferred-sub-shadowrocket.txt"));
+    return privateTextResponse(generateShadowrocketSubscription(template, normalizeNodes(nodes, nameOptions)), "text/plain; charset=utf-8", subscriptionHeaders("preferred-sub-shadowrocket.txt"));
   }
 
   if (type === "clash" || type === "mihomo") {
-    return privateTextResponse(generateClashSubscription(template, normalizeNodes(nodes)), "text/yaml; charset=utf-8", subscriptionHeaders("preferred-sub.yaml"));
+    return privateTextResponse(generateClashSubscription(template, normalizeNodes(nodes, nameOptions), generatorOptions), "text/yaml; charset=utf-8", subscriptionHeaders("preferred-sub.yaml"));
   }
 
   if (type === "singbox" || type === "sing-box") {
-    return privateTextResponse(generateSingboxSubscription(template, normalizeNodes(nodes)), "application/json; charset=utf-8", subscriptionHeaders("preferred-sub.json"));
+    return privateTextResponse(generateSingboxSubscription(template, normalizeNodes(nodes, nameOptions), generatorOptions), "application/json; charset=utf-8", subscriptionHeaders("preferred-sub.json"));
   }
 
   return jsonResponse(errorPayload("UNSUPPORTED_SUBSCRIPTION_TYPE", "Unsupported subscription type"), 400);

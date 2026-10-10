@@ -3,12 +3,12 @@
     "name": "cloudflare-official-v4",
     "url": "https://www.cloudflare.com/ips-v4/",
     "type": "text",
-    "cidrSamples": 4
+    "cidrSamples": 16
   },
   {
     "name": "cloudflare-official-v6",
     "url": "https://www.cloudflare.com/ips-v6/",
     "type": "text",
-    "cidrSamples": 4
+    "cidrSamples": 16
   }
 ]

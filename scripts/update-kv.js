@@ -10,6 +10,8 @@ import { deleteKvValue, readKvValue, writeKvValue } from "./lib/kv.js";
 const ROOT = new URL("..", import.meta.url);
 const MIN_AVAILABLE_TO_OVERWRITE = 20;
 const DEFAULT_VERSION_RETENTION = 30;
+// KV 里存的是"过审池"而不是发给所有人的固定前 50 名；订阅端从池里抽样，池要够大才有轮换空间
+const MAX_POOL_NODES = 300;
 
 async function readJsonFile(path, fallback) {
   try {
@@ -29,6 +31,34 @@ async function readTextFile(path, fallback = "") {
 
 function edgeName(item, index) {
   return formatEdgeNodeName(item, index);
+}
+
+// 检查结果是 (地址 × 端口) 的平铺列表；按地址聚合为一条池记录，记下全部通过端口，
+// 首选端口优先 443（国内对非 443 的 CF 端口更不友好），其次取测到的最优那条。
+export function aggregateCheckedResults(checked) {
+  const byAddress = new Map();
+  for (const item of Array.isArray(checked) ? checked : []) {
+    if (!item?.address) continue;
+    const group = byAddress.get(item.address);
+    if (group) group.push(item);
+    else byAddress.set(item.address, [item]);
+  }
+
+  return [...byAddress.values()].map((results) => {
+    const ports = [...new Set(results.map((item) => Number(item.port)).filter((port) => Number.isFinite(port) && port > 0))]
+      .sort((a, b) => (a === 443 ? -1 : b === 443 ? 1 : a - b));
+    const preferred = results.find((item) => Number(item.port) === ports[0]) || results[0];
+    return {
+      address: preferred.address,
+      port: ports[0] ?? preferred.port,
+      ports,
+      latency: preferred.latency,
+      speed: preferred.speed ?? null,
+      colo: preferred.colo || results.find((item) => item.colo)?.colo || "",
+      edgeVerified: results.some((item) => item.edgeVerified),
+      source: preferred.source || results[0]?.source,
+    };
+  });
 }
 
 function buildTrendHistory(previousHistory, current, now) {
@@ -91,6 +121,7 @@ export async function buildUpdatePayload({
   allowTcpOnly = false,
   maxSourceBytes,
   versionRetention = DEFAULT_VERSION_RETENTION,
+  poolLimit = MAX_POOL_NODES,
 } = {}) {
   const templateValue = originalNode.trim();
   const template = parseVlessUri(templateValue);
@@ -104,9 +135,10 @@ export async function buildUpdatePayload({
     requireCfRay,
     allowTcpOnly,
   });
-  const nextBestIps = checked.slice(0, 50).map((item, index) => ({
+  const nextBestIps = aggregateCheckedResults(checked).slice(0, poolLimit).map((item, index) => ({
     address: item.address,
     port: item.port,
+    ports: item.ports,
     name: edgeName(item, index),
     latency: item.latency,
     speed: item.speed == null ? null : (Number.isFinite(Number(item.speed)) ? Number(item.speed) : null),
