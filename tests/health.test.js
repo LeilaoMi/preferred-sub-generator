@@ -2,9 +2,18 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { handleHealth } from "../src/api/health.js";
 
-function createEnv(values) {
+const nodeEnv = {
+  VLESS_UUID: "11111111-1111-4111-8111-111111111111",
+  VLESS_SNI: "example.com",
+  VLESS_HOST: "example.com",
+  VLESS_PATH: "/ws",
+};
+
+function createEnv(values, extra = {}) {
   return {
     SUB_TOKEN: "secret-token",
+    ...nodeEnv,
+    ...extra,
     SUB_KV: {
       async get(key) {
         return values[key] || null;
@@ -13,9 +22,8 @@ function createEnv(values) {
   };
 }
 
-test("health returns minimal public ok without template details", async () => {
+test("health returns minimal public ok without config details", async () => {
   const response = await handleHealth(new Request("https://example.com/health"), createEnv({
-    TEMPLATE: "vless://x",
     BEST_IPS: JSON.stringify([{ address: "1.1.1.1" }]),
   }));
   const parsed = await response.json();
@@ -26,7 +34,7 @@ test("health returns minimal public ok without template details", async () => {
   assert.equal(response.headers.get("X-Robots-Tag"), "noindex,nofollow,noarchive");
 });
 
-test("health returns minimal public failure when required KV values are missing", async () => {
+test("health returns minimal public failure when required values are missing", async () => {
   const response = await handleHealth(new Request("https://example.com/health"), createEnv({}));
   const parsed = await response.json();
 
@@ -36,7 +44,6 @@ test("health returns minimal public failure when required KV values are missing"
 
 test("health full requires admin auth and returns details", async () => {
   const env = createEnv({
-    TEMPLATE: "vless://x",
     BEST_IPS: JSON.stringify([{ address: "1.1.1.1" }]),
   });
   const denied = await handleHealth(new Request("https://example.com/health/full"), env);
@@ -49,6 +56,12 @@ test("health full requires admin auth and returns details", async () => {
   assert.equal(allowed.status, 200);
   assert.equal(parsed.ok, true);
   assert.equal(parsed.kv, true);
-  assert.equal(parsed.templateExists, true);
+  assert.equal(parsed.configOk, true);
   assert.equal(parsed.bestIpsCount, 1);
+});
+
+test("health fails without node config", async () => {
+  const env = createEnv({ BEST_IPS: JSON.stringify([{ address: "1.1.1.1" }]) }, { VLESS_UUID: "" });
+  const response = await handleHealth(new Request("https://example.com/health"), env);
+  assert.equal(response.status, 503);
 });

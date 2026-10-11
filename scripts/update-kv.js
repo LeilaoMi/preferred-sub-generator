@@ -1,5 +1,4 @@
 import fs from "node:fs/promises";
-import { parseVlessUri } from "../src/parser/vless.js";
 import { formatEdgeNodeName } from "../src/utils/colo.js";
 import { getPortsForSecurity } from "../src/utils/ports.js";
 import { checkCandidates } from "./lib/check.js";
@@ -175,7 +174,7 @@ function previousFallbackCount(previousStatus) {
 }
 
 export async function buildUpdatePayload({
-  originalNode,
+  nodeConfig,
   manualText,
   remoteSources,
   previousBestIps = [],
@@ -192,8 +191,10 @@ export async function buildUpdatePayload({
   versionRetention = DEFAULT_VERSION_RETENTION,
   poolLimit = MAX_POOL_NODES,
 } = {}) {
-  const templateValue = originalNode.trim();
-  const template = parseVlessUri(templateValue);
+  // 节点探测参数来自离散环境变量（对标竞品），不再解析模板 URI
+  const nodeHost = (nodeConfig?.host || nodeConfig?.sni || "").trim();
+  const nodeSecurity = (nodeConfig?.security || "tls").trim() || "tls";
+  if (!nodeHost) throw new Error("Missing node host: 请配置 VLESS_SNI / VLESS_HOST 环境变量");
   const { candidates: allCandidates, sourceHealth } = await collectCandidatesWithHealth({ manualText, remoteSources, fetchImpl, maxSourceBytes });
   // P2-6: IPv6 单独分流，不进 check
   const v6Candidates = [];
@@ -203,10 +204,10 @@ export async function buildUpdatePayload({
   }
   const v6Pool = buildV6Pool(v6Candidates);
   const checkParams = {
-    host: template.host || template.sni || template.address,
-    tlsEnabled: template.security === "tls",
+    host: nodeHost,
+    tlsEnabled: nodeSecurity === "tls",
   };
-  const checked = await checkCandidates(candidates, getPortsForSecurity(template.security, process.env), {
+  const checked = await checkCandidates(candidates, getPortsForSecurity(nodeSecurity, process.env), {
     checkOne,
     checkOptions: checkParams,
     requireCfRay,
@@ -263,7 +264,6 @@ export async function buildUpdatePayload({
   };
 
   return {
-    TEMPLATE: templateValue,
     BEST_IPS: JSON.stringify(bestIps, null, 2),
     BEST_IPS_V6: JSON.stringify(v6Pool, null, 2),
     [versionKey]: JSON.stringify(bestIps, null, 2),
@@ -279,17 +279,6 @@ export async function buildUpdatePayload({
     STATUS: JSON.stringify(currentStatus, null, 2),
     SOURCE_HEALTH: JSON.stringify(sourceHealth, null, 2),
   };
-}
-
-async function readCurrentTemplate() {
-  const value = await readKvValue({
-    accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
-    namespaceId: process.env.CLOUDFLARE_NAMESPACE_ID,
-    apiToken: process.env.CLOUDFLARE_API_TOKEN,
-    key: "TEMPLATE",
-  });
-  if (!value) throw new Error("Missing TEMPLATE. Please save a VLESS template from the web page first.");
-  return value.trim();
 }
 
 async function readPreviousBestIps() {
@@ -411,7 +400,12 @@ export async function main() {
   const previousStatus = await readPreviousStatus();
   const previousVersionIndex = await readPreviousVersionIndex();
   const previousAlertState = await readPreviousAlertState();
-  const originalNode = process.env.ORIGINAL_SUB_OR_NODE || await readCurrentTemplate();
+  // 探测用节点参数来自环境变量（对标竞品离散配置），不再读 KV 模板
+  const nodeConfig = {
+    sni: process.env.VLESS_SNI || "",
+    host: process.env.VLESS_HOST || "",
+    security: process.env.VLESS_SECURITY || "tls",
+  };
   const env = {
     REQUIRE_CF_RAY: process.env.REQUIRE_CF_RAY || "1",
     ALLOW_TCP_ONLY: process.env.ALLOW_TCP_ONLY || "0",
@@ -419,7 +413,7 @@ export async function main() {
     VERSION_RETENTION: process.env.VERSION_RETENTION || "",
   };
   const payload = await buildUpdatePayload({
-    originalNode,
+    nodeConfig,
     manualText,
     remoteSources,
     previousBestIps,

@@ -40,6 +40,9 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN_2 }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_NAMESPACE_ID: ${{ secrets.CLOUDFLARE_NAMESPACE_ID }}
+          VLESS_SNI: ${{ vars.VLESS_SNI }}
+          VLESS_HOST: ${{ vars.VLESS_HOST }}
+          VLESS_SECURITY: ${{ vars.VLESS_SECURITY }}
           UPDATE_WEBHOOK_URL: ${{ secrets.UPDATE_WEBHOOK_URL }}
           UPDATE_WEBHOOK_ALWAYS: ${{ vars.UPDATE_WEBHOOK_ALWAYS }}
           ALERT_REPEAT_HOURS: ${{ vars.ALERT_REPEAT_HOURS }}

@@ -6,7 +6,8 @@ import { requireReadAuth } from "../security/auth.js";
 import { jsonResponse, privateTextResponse, unauthorizedResponse } from "../utils/response.js";
 import { formatEdgeNodeName } from "../utils/colo.js";
 import { loadIpScores } from "./ip-feedback.js";
-import { readBestIps, readBestIpsV6, readTemplate } from "./kv.js";
+import { getNodeConfig, nodeConfigToTemplate, validateNodeConfig } from "../config/nodes.js";
+import { readBestIps, readBestIpsV6 } from "./kv.js";
 import { filterNodesByColo, parseColoFilter, rankNodesByScore, sampleNodes, withPreferredPort } from "./node-filter.js";
 import { getPreferredPortOrder } from "../utils/ports.js";
 
@@ -22,14 +23,6 @@ function isEdgetunnelProbe(url, request) {
   return url.searchParams.get("host") === "example.com"
     && uuid === EDGE_PROBE_UUID
     && ua.includes("edgetunnel");
-}
-
-function templateKeyFromUrl(url) {
-  const slot = url.searchParams.get("slot") || url.searchParams.get("template") || "";
-  if (!slot) return "TEMPLATE";
-  if (!/^\d{1,2}$/.test(slot)) return "TEMPLATE";
-  const n = Number(slot);
-  return n >= 1 && n <= 5 ? `TEMPLATE_${n}` : "TEMPLATE";
 }
 
 function getLimit(url, total) {
@@ -93,7 +86,18 @@ export async function handleSub(request, env) {
   const explicitType = url.searchParams.get("type");
   const type = edgeProbe ? "base64" : (explicitType || inferTypeFromUa(request.headers.get("user-agent")) || "vless").toLowerCase();
   const sampleMode = url.searchParams.get("mode") === "sample";
-  const template = await readTemplate(env.SUB_KV, templateKeyFromUrl(url));
+  // 节点参数来自环境变量（对标竞品离散配置），不再读 KV 模板
+  let nodeConfig;
+  try {
+    nodeConfig = getNodeConfig(env);
+  } catch (error) {
+    return jsonResponse({ error: error.message }, 500);
+  }
+  const configWarnings = validateNodeConfig(nodeConfig);
+  if (configWarnings.some((w) => w.level === "error")) {
+    return jsonResponse({ error: configWarnings.find((w) => w.level === "error").message }, 500);
+  }
+  const template = nodeConfigToTemplate(nodeConfig);
   const { colos } = parseColoFilter(url.searchParams.get("colo"), request);
   let nodes = await readBestIps(env.SUB_KV);
   let scores = null;

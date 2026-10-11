@@ -44,18 +44,16 @@ test("homepage is Chinese, builds protected subscription URLs, and uses admin to
 test("admin page is Chinese and uses admin token for api/template", async () => {
   const html = await fs.readFile(new URL("../public/admin.html", import.meta.url), "utf8");
 
-  assert.match(html, /订阅配置/);
+  assert.match(html, /节点配置/);
   assert.match(html, /管理 token/);
   assert.match(html, /api\/template/);
   assert.match(html, /Authorization/);
-  assert.match(html, /从 VLESS 链接导入/);
-  assert.match(html, /保存模板/);
-  assert.match(html, /f_sni/);
-  assert.match(html, /f_uuid/);
+  assert.match(html, /环境变量/);
+  assert.match(html, /VLESS_UUID/);
   assert.match(html, /warnBox/);
   assert.match(html, /function escapeHtml/);
-  assert.match(html, /escapeHtml\(preview\[key\] \|\| "-"\)/);
   assert.doesNotMatch(html, /secret-token/);
+  assert.doesNotMatch(html, /保存模板/);
 });
 
 test("homepage exposes colo filter input and local edge rtt metrics", async () => {

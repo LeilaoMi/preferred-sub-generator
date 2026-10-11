@@ -5,7 +5,6 @@ import { handleIpFeedbackGet, handleIpFeedbackPost, loadIpScores, summarizeIpSco
 import { handleSub } from "../src/api/sub.js";
 import { filterNodesByColo, parseColoFilter, rankNodesByScore } from "../src/api/node-filter.js";
 
-const template = "vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=tls&sni=example.com&type=ws&host=example.com&path=%2Fws#原始节点";
 const bestIps = [
   { address: "1.1.1.1", port: 443, name: undefined, colo: "LAX", latency: 12 },
   { address: "1.1.1.2", port: 8443, name: undefined, colo: "SJC", latency: 34 },
@@ -16,13 +15,19 @@ const RECENT_AT = new Date(Date.now() - 60 * 1000).toISOString();
 
 function createEnv(extra = {}) {
   const data = new Map([
-    ["TEMPLATE", template],
     ["BEST_IPS", JSON.stringify(bestIps)],
   ]);
 
   return {
     SUB_TOKEN: "secret-token",
     SUB_READ_TOKEN: "read-token",
+    VLESS_UUID: "11111111-1111-4111-8111-111111111111",
+    VLESS_SNI: "example.com",
+    VLESS_HOST: "example.com",
+    VLESS_PATH: "/ws",
+    VLESS_PORT: "443",
+    VLESS_TYPE: "ws",
+    VLESS_SECURITY: "tls",
     SUB_KV: {
       async get(key) { return data.get(key) || null; },
       async put(key, value) { data.set(key, value); },

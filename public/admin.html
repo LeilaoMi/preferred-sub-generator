@@ -86,64 +86,18 @@
 <body>
   <main>
     <section class="card">
-      <h1>订阅配置</h1>
-      <p>模板决定所有生成节点的 UUID、SNI、Host、路径与 TLS 设置。请分项填写，保存时会自动校验风险项（如在中国大陆被 SNI 阻断的域名）。不再支持"粘一条链接就静默照抄"。</p>
+      <h1>节点配置</h1>
+      <p>节点参数（UUID、SNI、Host、路径、TLS）来自 Cloudflare Pages 的环境变量（对标竞品做法），项目内不再保存任何模板。修改请去 Cloudflare Dashboard → Pages 项目 → 设置 → 环境变量，改完自动重新部署生效。</p>
+      <p class="hint">环境变量：VLESS_UUID / VLESS_SNI / VLESS_HOST / VLESS_PATH / VLESS_PORT / VLESS_TYPE / VLESS_SECURITY</p>
 
       <label for="token">管理 token</label>
       <input id="token" type="password" placeholder="粘贴你的管理 token" autocomplete="off" />
 
-      <div class="fieldgrid">
-        <div>
-          <label for="f_uuid">UUID</label>
-          <input id="f_uuid" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" autocomplete="off" />
-        </div>
-        <div>
-          <label for="f_sni">SNI（TLS 握手域名）</label>
-          <input id="f_sni" placeholder="如：v.example.com" autocomplete="off" />
-          <div class="hint">GFW 按 SNI 阻断，workers.dev / pages.dev 在此高危</div>
-        </div>
-        <div>
-          <label for="f_host">Host（HTTP 域名，决定路由到哪个后端）</label>
-          <input id="f_host" placeholder="如：xxx.workers.dev" autocomplete="off" />
-        </div>
-        <div>
-          <label for="f_path">路径 Path</label>
-          <input id="f_path" placeholder="/ 或 /?ed=2048" autocomplete="off" />
-        </div>
-        <div>
-          <label for="f_port">端口</label>
-          <input id="f_port" type="number" min="1" max="65535" value="443" />
-        </div>
-        <div>
-          <label for="f_type">传输类型</label>
-          <select id="f_type">
-            <option value="ws">ws</option>
-            <option value="tcp">tcp</option>
-            <option value="grpc">grpc</option>
-          </select>
-        </div>
-        <div>
-          <label for="f_security">TLS</label>
-          <select id="f_security">
-            <option value="tls">tls</option>
-            <option value="none">none</option>
-          </select>
-        </div>
-      </div>
-
-      <details>
-        <summary>从 VLESS 链接导入（仅填充上方字段，仍需检查后保存）</summary>
-        <label for="templateImport">VLESS 链接</label>
-        <textarea id="templateImport" placeholder="vless://..."></textarea>
-        <button id="importBtn" class="secondary">解析并填入字段</button>
-      </details>
-
-      <button id="load">读取当前模板</button>
-      <button id="save">保存模板</button>
+      <button id="load">读取当前配置</button>
 
       <div id="message" class="status">请先填写管理 token，或用 /admin.html#token=你的token 打开。</div>
       <div id="warnBox"></div>
-      <div id="previewBox" class="grid"></div>
+      <div id="configBox" class="grid"></div>
     </section>
 
     <section class="card" style="margin-top: 24px;">
@@ -165,10 +119,7 @@
   <script>
     const tokenInput = document.getElementById("token");
     const message = document.getElementById("message");
-    const previewBox = document.getElementById("previewBox");
     const warnBox = document.getElementById("warnBox");
-    const fieldIds = ["uuid", "sni", "host", "path", "port", "type", "security"];
-    const fieldEls = Object.fromEntries(fieldIds.map((k) => [k, document.getElementById("f_" + k)]));
     const tokenFromUrl = location.hash.replace(/^#token=/, "").trim();
     if (tokenFromUrl) {
       tokenInput.value = tokenFromUrl;
@@ -190,16 +141,6 @@
       }[char]));
     }
 
-    function renderPreview(preview) {
-      const fields = ["uuid", "port", "security", "type", "host", "sni", "path"];
-      previewBox.innerHTML = fields.map((key) => `
-        <div class="item">
-          <div class="key">${escapeHtml(key)}</div>
-          <div class="value">${escapeHtml(preview[key] || "-")}</div>
-        </div>
-      `).join("");
-    }
-
     function renderWarnings(warnings) {
       const list = Array.isArray(warnings) ? warnings : [];
       if (list.length === 0) { warnBox.innerHTML = ""; return; }
@@ -208,94 +149,40 @@
       `).join("") + `</div>`;
     }
 
-    function collectFields() {
-      return {
-        uuid: fieldEls.uuid.value.trim(),
-        sni: fieldEls.sni.value.trim(),
-        host: fieldEls.host.value.trim(),
-        path: fieldEls.path.value.trim(),
-        port: Number(fieldEls.port.value) || 443,
-        type: fieldEls.type.value,
-        security: fieldEls.security.value,
-      };
-    }
-
-    function fillFields(f) {
-      if (!f) return;
-      fieldEls.uuid.value = f.uuid || "";
-      fieldEls.sni.value = f.sni || "";
-      fieldEls.host.value = f.host || "";
-      fieldEls.path.value = f.path || "";
-      fieldEls.port.value = f.port || 443;
-      fieldEls.type.value = f.type || "ws";
-      fieldEls.security.value = f.security || "tls";
-    }
-
-    async function requestTemplate(method, body) {
-      const token = tokenInput.value.trim();
-      if (!token) throw new Error("请先填写管理 token");
-
-      const response = await fetch("/api/template", {
-        method,
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: body ? JSON.stringify(body) : undefined,
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        renderWarnings(data.warnings);
-        throw new Error(data.error || "请求失败");
-      }
-      return data;
+    function renderConfig(fields) {
+      const box = document.getElementById("configBox");
+      if (!fields) { box.innerHTML = ""; return; }
+      const rows = [
+        ["UUID", fields.uuid ? fields.uuid.slice(0, 8) + "…" : "(未配置)"],
+        ["SNI", fields.sni || "(未配置)"],
+        ["Host", fields.host || "(未配置)"],
+        ["Path", fields.path || "(空)"],
+        ["端口", String(fields.port || 443)],
+        ["传输", fields.type || "ws"],
+        ["TLS", fields.security || "tls"],
+      ];
+      box.innerHTML = rows.map(([k, v]) =>
+        `<div class="stat"><div class="k">${escapeHtml(k)}</div><div class="v">${escapeHtml(v)}</div></div>`
+      ).join("");
     }
 
     document.getElementById("load").onclick = async () => {
       try {
         renderWarnings([]);
-        const data = await requestTemplate("GET");
-        fillFields(data.fields);
-        renderPreview(data.preview || {});
-        renderWarnings(data.warnings);
-        setMessage("已读取当前模板并填入各字段，检查后可修改保存。", "good");
-      } catch (error) {
-        setMessage(error.message, "bad");
-      }
-    };
-
-    document.getElementById("importBtn").onclick = () => {
-      try {
-        const raw = document.getElementById("templateImport").value.trim();
-        const url = new URL(raw);
-        if (url.protocol !== "vless:") throw new Error("必须是 vless:// 链接");
-        const params = Object.fromEntries(url.searchParams.entries());
-        fillFields({
-          uuid: decodeURIComponent(url.username),
-          sni: params.sni || params.peer || "",
-          host: params.host || "",
-          path: params.path ? decodeURIComponent(params.path) : "",
-          port: url.port ? Number(url.port) : 443,
-          type: params.type || "ws",
-          security: params.security || "tls",
+        const token = tokenInput.value.trim();
+        if (!token) throw new Error("请先填写管理 token");
+        const response = await fetch("/api/template", {
+          headers: { "Authorization": `Bearer ${token}` },
         });
-        setMessage("已从链接解析并填入字段，请逐项检查（尤其 SNI）后再保存。", "good");
-      } catch (error) {
-        setMessage("导入失败：" + error.message, "bad");
-      }
-    };
-
-    document.getElementById("save").onclick = async () => {
-      try {
-        renderWarnings([]);
-        const data = await requestTemplate("POST", { fields: collectFields() });
-        renderPreview(data.preview || {});
-        renderWarnings(data.warnings);
+        const data = await response.json();
+        if (!response.ok) {
+          renderWarnings(data.warnings || []);
+          throw new Error(data.error || "请求失败");
+        }
+        renderConfig(data.fields);
+        renderWarnings(data.warnings || []);
         const hasWarn = (data.warnings || []).length > 0;
-        setMessage(
-          hasWarn ? "保存成功，但存在风险提示，请务必查看上方黄色警告。" : "保存成功。订阅接口会立即使用新模板。",
-          hasWarn ? "" : "good",
-        );
+        setMessage(hasWarn ? "配置已读取，但存在风险提示，请查看黄色警告。" : "当前生效的节点配置如上（来自环境变量）。", hasWarn ? "" : "good");
       } catch (error) {
         setMessage(error.message, "bad");
       }

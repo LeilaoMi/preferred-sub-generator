@@ -205,7 +205,7 @@ test("aggregate checked results groups ports per address and prefers 443", () =>
 
 test("build update payload stores pooled checked nodes with colo names", async () => {
   const payload = await buildUpdatePayload({
-    originalNode: "vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=tls&sni=example.com&type=ws&host=example.com&path=%2Fws#原始节点",
+    nodeConfig: { sni: "example.com", host: "example.com", security: "tls" },
     manualText: Array.from({ length: 60 }, (_, index) => `1.1.1.${index + 1}`).join("\n"),
     remoteSources: [],
     checkOne: async (address) => ({ latency: Number(address.split(".").at(-1)), colo: "LAX", edgeVerified: true }),
@@ -215,7 +215,7 @@ test("build update payload stores pooled checked nodes with colo names", async (
   const bestIps = JSON.parse(payload.BEST_IPS);
   const status = JSON.parse(payload.STATUS);
 
-  assert.equal(payload.TEMPLATE.startsWith("vless://"), true);
+  assert.equal(payload.TEMPLATE, undefined);
   assert.equal(bestIps.length, 60);
   assert.equal(bestIps[0].address, "1.1.1.1");
   assert.equal(bestIps[0].port, 443);
@@ -240,7 +240,7 @@ test("build update payload stores pooled checked nodes with colo names", async (
 
 test("build update payload caps pool size by poolLimit", async () => {
   const payload = await buildUpdatePayload({
-    originalNode: "vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=tls&sni=example.com&type=ws&host=example.com&path=%2Fws#原始节点",
+    nodeConfig: { sni: "example.com", host: "example.com", security: "tls" },
     manualText: Array.from({ length: 10 }, (_, index) => `1.1.1.${index + 1}`).join("\n"),
     remoteSources: [],
     poolLimit: 3,
@@ -261,7 +261,7 @@ test("build update payload records speed when CSV source provides bandwidth", as
     "130.61.203.115,443,443,true,FRA,Europe,Frankfurt,195,5.0",
   ].join("\n");
   const payload = await buildUpdatePayload({
-    originalNode: "vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=tls&sni=example.com&type=ws&host=example.com&path=%2Fws#原始节点",
+    nodeConfig: { sni: "example.com", host: "example.com", security: "tls" },
     remoteSources: [{ name: "csv", url: "https://source.example/addressescsv.csv", type: "csv", minSpeed: 0 }],
     checkOne: async (address) => ({ latency: 50, colo: "NRT", edgeVerified: true }),
     downloadSpeedImpl: async () => null,
@@ -280,7 +280,7 @@ test("build update payload records speed when CSV source provides bandwidth", as
 
 test("P2-10 build update payload writes measured bandwidth over CSV speed", async () => {  const seen = [];
   const payload = await buildUpdatePayload({
-    originalNode: "vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=tls&sni=example.com&type=ws&host=example.com&path=%2Fws#原始节点",
+    nodeConfig: { sni: "example.com", host: "example.com", security: "tls" },
     manualText: "1.1.1.1\n2.2.2.2",
     remoteSources: [],
     checkOne: async () => ({ latency: 10, colo: "LAX", edgeVerified: true }),
@@ -303,7 +303,7 @@ test("P2-10 build update payload writes measured bandwidth over CSV speed", asyn
 test("P2-6 build update payload diverts IPv6 candidates to BEST_IPS_V6 untested", async () => {
   const checkedAddresses = [];
   const payload = await buildUpdatePayload({
-    originalNode: "vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=tls&sni=example.com&type=ws&host=example.com&path=%2Fws#原始节点",
+    nodeConfig: { sni: "example.com", host: "example.com", security: "tls" },
     manualText: "1.1.1.1\n2400:cb00::1",
     remoteSources: [],
     checkOne: async (address) => {
@@ -329,7 +329,7 @@ test("P2-6 build update payload diverts IPv6 candidates to BEST_IPS_V6 untested"
 test("build update payload keeps previous nodes when new result is too small", async () => {
   const previousBestIps = [{ address: "9.9.9.9", port: 443, name: "旧节点" }];
   const payload = await buildUpdatePayload({
-    originalNode: "vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=tls&sni=example.com&type=ws&host=example.com&path=%2Fws#原始节点",
+    nodeConfig: { sni: "example.com", host: "example.com", security: "tls" },
     manualText: "1.1.1.1",
     remoteSources: [],
     previousBestIps,
@@ -355,7 +355,7 @@ test("build update payload keeps previous nodes when new result is too small", a
 test("build update payload keeps version index bounded", async () => {
   const previousVersionIndex = Array.from({ length: 31 }, (_, index) => `BEST_IPS_OLD_${String(index).padStart(2, "0")}`);
   const payload = await buildUpdatePayload({
-    originalNode: "vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=tls&sni=example.com&type=ws&host=example.com&path=%2Fws#原始节点",
+    nodeConfig: { sni: "example.com", host: "example.com", security: "tls" },
     manualText: "1.1.1.1\n1.1.1.2\n1.1.1.3\n1.1.1.4\n1.1.1.5\n1.1.1.6\n1.1.1.7\n1.1.1.8\n1.1.1.9\n1.1.1.10\n1.1.1.11\n1.1.1.12\n1.1.1.13\n1.1.1.14\n1.1.1.15\n1.1.1.16\n1.1.1.17\n1.1.1.18\n1.1.1.19\n1.1.1.20",
     remoteSources: [],
     previousVersionIndex,
@@ -502,7 +502,7 @@ test("P0-2 parseCsv honors remarkColumn option", () => {
 
 test("build update payload honors source max bytes and version retention options", async () => {  const previousVersionIndex = ["BEST_IPS_A", "BEST_IPS_B", "BEST_IPS_C"];
   const payload = await buildUpdatePayload({
-    originalNode: "vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=tls&sni=example.com&type=ws&host=example.com&path=%2Fws#原始节点",
+    nodeConfig: { sni: "example.com", host: "example.com", security: "tls" },
     manualText: Array.from({ length: 20 }, (_, index) => `1.1.1.${index + 1}`).join("\n"),
     remoteSources: [{ name: "too-large", url: "https://source.example/large.txt" }],
     previousVersionIndex,

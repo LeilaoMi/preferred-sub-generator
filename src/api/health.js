@@ -1,13 +1,17 @@
 import { requireAuth } from "../security/auth.js";
 import { jsonResponse, unauthorizedResponse } from "../utils/response.js";
-
-async function exists(kv, key) {
-  const value = await kv.get(key);
-  return Boolean(value);
-}
+import { getNodeConfig, validateNodeConfig } from "../config/nodes.js";
 
 async function readHealthDetails(env) {
-  const templateExists = await exists(env.SUB_KV, "TEMPLATE");
+  let configOk = false;
+  let configWarnings = [];
+  try {
+    const config = getNodeConfig(env);
+    configWarnings = validateNodeConfig(config);
+    configOk = !configWarnings.some((w) => w.level === "error");
+  } catch {
+    configOk = false;
+  }
   const bestIpsRaw = await env.SUB_KV.get("BEST_IPS");
   let bestIpsCount = 0;
 
@@ -18,8 +22,8 @@ async function readHealthDetails(env) {
     bestIpsCount = 0;
   }
 
-  const ok = templateExists && bestIpsCount > 0;
-  return { ok, kv: true, templateExists, bestIpsCount };
+  const ok = configOk && bestIpsCount > 0;
+  return { ok, kv: true, configOk, configWarnings, bestIpsCount };
 }
 
 export async function handleHealth(request, env) {

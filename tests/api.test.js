@@ -43,6 +43,14 @@ function createEnv() {
   return {
     SUB_TOKEN: "secret-token",
     SUB_READ_TOKEN: "read-token",
+    // 节点配置：离散环境变量（对标竞品），不再用 KV 模板
+    VLESS_UUID: "11111111-1111-4111-8111-111111111111",
+    VLESS_SNI: "example.com",
+    VLESS_HOST: "example.com",
+    VLESS_PATH: "/ws",
+    VLESS_PORT: "443",
+    VLESS_TYPE: "ws",
+    VLESS_SECURITY: "tls",
     SUB_KV: {
       async get(key) {
         return data.get(key) || null;
@@ -108,6 +116,13 @@ function createSampleEnv() {
   return {
     SUB_TOKEN: "secret-token",
     SUB_READ_TOKEN: "read-token",
+    VLESS_UUID: "11111111-1111-4111-8111-111111111111",
+    VLESS_SNI: "example.com",
+    VLESS_HOST: "example.com",
+    VLESS_PATH: "/ws",
+    VLESS_PORT: "443",
+    VLESS_TYPE: "ws",
+    VLESS_SECURITY: "tls",
     SUB_KV: {
       async get(key) {
         return data.get(key) || null;
@@ -187,6 +202,13 @@ test("edgetunnel probe caps sampled nodes at 30", async () => {
   const env = {
     SUB_TOKEN: "secret-token",
     SUB_READ_TOKEN: "read-token",
+    VLESS_UUID: "11111111-1111-4111-8111-111111111111",
+    VLESS_SNI: "example.com",
+    VLESS_HOST: "example.com",
+    VLESS_PATH: "/ws",
+    VLESS_PORT: "443",
+    VLESS_TYPE: "ws",
+    VLESS_SECURITY: "tls",
     SUB_KV: { async get(key) { return data.get(key) || null; }, put(key, value) { data.set(key, value); } },
   };
   const probe = new Request(
@@ -324,16 +346,6 @@ test("P2-6 sub excludes IPv6 pool by default, includes with ?ip6=1", async () =>
 
 
 
-test("sub accepts slot alias for template selection", async () => {
-  const env = createEnv();
-  await env.SUB_KV.put("TEMPLATE_2", template.replaceAll("example.com", "slot.example.com"));
-  const response = await handleSub(subRequest("/sub?type=vless&slot=2&n=1"), env);
-  const text = await response.text();
-
-  assert.equal(response.status, 200);
-  assert.match(text, /sni=slot\.example\.com/);
-});
-
 test("v2rayNG subscription can wrap base64 output", async () => {
   const response = await handleSub(subRequest("/sub?type=v2rayng&n=2&wrap=76"), createEnv());
   const encoded = await response.text();
@@ -383,96 +395,48 @@ test("template API: query token works only when explicitly enabled", async () =>
   assert.equal(response.status, 200);
 });
 
-test("template API: POST saves new vless and returns parsed", async () => {
+test("template API: POST is gone (410), config moved to env vars", async () => {
   const env = createEnv();
   const response = await handleTemplatePost(
     new Request("https://example.com/template", {
       method: "POST",
       headers: { Authorization: "Bearer secret-token" },
-      body: JSON.stringify({
-        template: "vless://22222222-2222-4222-8222-222222222222$new.example:443?encryption=none&security=tls&sni=new.example&type=ws&host=new.example&path=%2Fnew#新节点".replace("$", "@"),
-      }),
+      body: JSON.stringify({ fields: { uuid: "x" } }),
+    }),
+    env,
+  );
+  assert.equal(response.status, 410);
+  const parsed = await response.json();
+  assert.match(parsed.error, /环境变量/);
+});
+
+test("template API: GET returns env-based config", async () => {
+  const env = createEnv();
+  const response = await handleTemplateGet(
+    new Request("https://example.com/template", {
+      headers: { Authorization: "Bearer secret-token" },
     }),
     env,
   );
   const parsed = await response.json();
-  const saved = await env.SUB_KV.get("TEMPLATE");
-
   assert.equal(response.status, 200);
-  assert.equal(parsed.saved, true);
-  assert.equal(parsed.preview.uuid, "22222222-2222-4222-8222-222222222222");
-  // 新逻辑：统一存规范 JSON，不再原样存 URI 字符串
-  const stored = JSON.parse(saved);
-  assert.equal(stored.uuid, "22222222-2222-4222-8222-222222222222");
-  assert.equal(stored.sni, "new.example");
+  assert.equal(parsed.key, "ENV");
+  assert.equal(parsed.fields.sni, "example.com");
+  assert.equal(parsed.fields.host, "example.com");
+  assert.equal(parsed.templateSafe.uuidMasked, "11111111…");
   assert.equal(parsed.warnings.length, 0);
 });
 
-test("template API: POST fields format saves canonical JSON", async () => {
-  const env = createEnv();
-  const response = await handleTemplatePost(
+test("template API: GET warns on risky SNI from env", async () => {
+  const env = { ...createEnv(), VLESS_SNI: "xxx.workers.dev", VLESS_HOST: "xxx.workers.dev" };
+  const response = await handleTemplateGet(
     new Request("https://example.com/template", {
-      method: "POST",
       headers: { Authorization: "Bearer secret-token" },
-      body: JSON.stringify({
-        fields: {
-          uuid: "33333333-3333-4333-8333-333333333333",
-          sni: "front.example.com",
-          host: "backend.example.net",
-          path: "/ws",
-          port: 443,
-          security: "tls",
-          type: "ws",
-        },
-      }),
-    }),
-    env,
-  );
-  const parsed = await response.json();
-  const stored = JSON.parse(await env.SUB_KV.get("TEMPLATE"));
-
-  assert.equal(response.status, 200);
-  assert.equal(parsed.saved, true);
-  assert.equal(stored.sni, "front.example.com");
-  assert.equal(stored.host, "backend.example.net");
-  assert.equal(stored.protocol, "vless");
-});
-
-test("template API: POST rejects missing uuid", async () => {
-  const env = createEnv();
-  const response = await handleTemplatePost(
-    new Request("https://example.com/template", {
-      method: "POST",
-      headers: { Authorization: "Bearer secret-token" },
-      body: JSON.stringify({ fields: { sni: "a.com", host: "b.com" } }),
-    }),
-    env,
-  );
-  assert.equal(response.status, 400);
-  const parsed = await response.json();
-  assert.match(parsed.error, /UUID/);
-});
-
-test("template API: POST warns on workers.dev SNI but still saves", async () => {
-  const env = createEnv();
-  const response = await handleTemplatePost(
-    new Request("https://example.com/template", {
-      method: "POST",
-      headers: { Authorization: "Bearer secret-token" },
-      body: JSON.stringify({
-        fields: {
-          uuid: "44444444-4444-4444-8444-444444444444",
-          sni: "xxx.workers.dev",
-          host: "xxx.workers.dev",
-          path: "/",
-        },
-      }),
     }),
     env,
   );
   const parsed = await response.json();
   assert.equal(response.status, 200);
-  assert.equal(parsed.saved, true);
   assert.ok(parsed.warnings.some((w) => w.field === "sni" && w.level === "warn"));
 });
 
