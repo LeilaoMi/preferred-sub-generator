@@ -13,7 +13,7 @@ const HELP = `用法: node scripts/probe-ips.js [选项]
 
 选项:
   --site <url>          站点地址（默认 env SITE_URL，如 https://yxdy.woniu.bee.al）
-  --token <token>       管理 token（默认 env SUB_TOKEN）
+  --token <token>       管理 token（默认 env SUB_TOKEN；无 token 时加 --no-submit 只测不回传）
   --n <count>           探测节点数量（默认 50）
   --speed <MB>          每个 IP 下载测速大小，默认 2；0 表示只测延迟
   --sni <host>          测速用 SNI/Host（默认取订阅模板的域名，取不到才用 speed.cloudflare.com）
@@ -188,7 +188,7 @@ async function main() {
   const site = String(values.site || process.env.SITE_URL || "").replace(/\/+$/, "");
   const token = values.token || process.env.SUB_TOKEN || "";
   if (!site) throw new Error("缺少 --site 或 SITE_URL");
-  if (!token) throw new Error("缺少 --token 或 SUB_TOKEN");
+  // token 可选：无 token 时需用 --sni 指定探测域名，且跳过反馈提交
 
   const count = Math.max(1, Math.min(Number(values.n) || 50, 200));
   const speedMb = Math.max(0, Number(values.speed) || 0);
@@ -276,8 +276,8 @@ async function main() {
     console.log(`结果已写入 ${values.json}`);
   }
 
-  if (values["no-submit"]) {
-    console.log("--no-submit：未回传。");
+  if (values["no-submit"] || !token) {
+    console.log(token ? "--no-submit：未回传。" : "无 token，跳过回传（结果仅本地显示）。");
     return;
   }
 
