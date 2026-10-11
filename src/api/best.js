@@ -7,7 +7,7 @@ import { filterNodesByColo, parseColoFilter, rankNodesByScore } from "./node-fil
 const MAX_NODES = 50;
 
 export async function handleBest(request, env) {
-  const auth = requireReadAuth(request, env);
+  const auth = await requireReadAuth(request, env);
   if (!auth.authorized) return unauthorizedResponse();
 
   const url = new URL(request.url);
@@ -23,7 +23,7 @@ export async function handleBest(request, env) {
   let droppedUnreachable = 0;
   if (url.searchParams.get("rank") !== "off") {
     const { scores } = await loadIpScores(env);
-    nodes = rankNodesByScore(nodes, scores);
+    nodes = rankNodesByScore(nodes, scores, { env });
     droppedUnreachable = allNodes.length - nodes.length;
   }
   const filtered = filterNodesByColo(nodes, colos);

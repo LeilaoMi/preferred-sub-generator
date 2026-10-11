@@ -26,6 +26,14 @@ export async function readBestIps(kv) {
   return Array.isArray(parsed) ? parsed : [];
 }
 
+// P2-6: 未实测 IPv6 独立池
+export async function readBestIpsV6(kv) {
+  const value = await kv.get("BEST_IPS_V6");
+  if (!value) return [];
+  const parsed = JSON.parse(value);
+  return Array.isArray(parsed) ? parsed : [];
+}
+
 export async function readBestIpsVersion(kv, version) {
   if (!version) return readBestIps(kv);
   const key = version === "last" ? "BEST_IPS_LAST" : `BEST_IPS_${version}`;

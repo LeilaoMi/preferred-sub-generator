@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { checkCandidates, parseCfRayColo } from "../scripts/lib/check.js";
-import { collectCandidates, collectCandidatesWithHealth, expandIPv4Cidr, expandIPv6Cidr, parseCandidate, uniqueCandidates } from "../scripts/lib/candidates.js";
+import { collectCandidates, collectCandidatesWithHealth, expandIPv4Cidr, expandIPv6Cidr, parseCandidate, parseCsv, uniqueCandidates } from "../scripts/lib/candidates.js";
 import { deleteKvValue, readKvValue, writeKvValue } from "../scripts/lib/kv.js";
 import { aggregateCheckedResults, buildUpdatePayload } from "../scripts/update-kv.js";
 
@@ -93,12 +93,39 @@ test("collect candidates from CloudflareSpeedTest CSV source", async () => {
     tls: true,
     colo: "NRT",
     speed: 11.59,
+    remark: "Tokyo",
   }]);
 });
 
 test("parse Cloudflare ray colo", () => {
   assert.equal(parseCfRayColo("973bbddc7e2210a8-LAX"), "LAX");
   assert.equal(parseCfRayColo("bad-value"), "");
+});
+
+test("P1-8 checkCandidates measures jitter across samples", async () => {
+  const latencies = [10, 20, 30];
+  let call = 0;
+  const result = await checkCandidates(
+    [{ address: "a.example", port: 443 }],
+    [443],
+    {
+      jitterSamples: 3,
+      checkOne: async () => ({ latency: latencies[call++ % latencies.length], colo: "LAX", edgeVerified: true }),
+    },
+  );
+  // stddev(10,20,30) = sqrt(200/3) ≈ 8.2；保留最优（最小）延迟
+  assert.equal(result[0].jitter, 8.2);
+  assert.equal(result[0].latency, 10);
+});
+
+test("P1-8 checkCandidates defaults to single sample with zero jitter", async () => {
+  const result = await checkCandidates(
+    [{ address: "a.example", port: 443 }],
+    [443],
+    { checkOne: async () => ({ latency: 42, colo: "LAX", edgeVerified: true }) },
+  );
+  assert.equal(result[0].jitter, 0);
+  assert.equal(result[0].latency, 42);
 });
 
 test("check candidates sorts by latency, expands ports and keeps colo", async () => {
@@ -182,6 +209,7 @@ test("build update payload stores pooled checked nodes with colo names", async (
     manualText: Array.from({ length: 60 }, (_, index) => `1.1.1.${index + 1}`).join("\n"),
     remoteSources: [],
     checkOne: async (address) => ({ latency: Number(address.split(".").at(-1)), colo: "LAX", edgeVerified: true }),
+    downloadSpeedImpl: async () => null,
     now: new Date("2026-06-03T00:00:00.000Z"),
   });
   const bestIps = JSON.parse(payload.BEST_IPS);
@@ -217,6 +245,7 @@ test("build update payload caps pool size by poolLimit", async () => {
     remoteSources: [],
     poolLimit: 3,
     checkOne: async (address) => ({ latency: Number(address.split(".").at(-1)), colo: "LAX", edgeVerified: true }),
+    downloadSpeedImpl: async () => null,
     now: new Date("2026-06-03T00:00:00.000Z"),
   });
   const bestIps = JSON.parse(payload.BEST_IPS);
@@ -235,6 +264,7 @@ test("build update payload records speed when CSV source provides bandwidth", as
     originalNode: "vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=tls&sni=example.com&type=ws&host=example.com&path=%2Fws#原始节点",
     remoteSources: [{ name: "csv", url: "https://source.example/addressescsv.csv", type: "csv", minSpeed: 0 }],
     checkOne: async (address) => ({ latency: 50, colo: "NRT", edgeVerified: true }),
+    downloadSpeedImpl: async () => null,
     fetchImpl: async () => new Response(csv),
     now: new Date("2026-06-03T00:00:00.000Z"),
   });
@@ -248,6 +278,54 @@ test("build update payload records speed when CSV source provides bandwidth", as
   assert.equal(status.averageSpeed, 8); // (11.59 + 5.0) / 2 ≈ 8.3 → 8
 });
 
+test("P2-10 build update payload writes measured bandwidth over CSV speed", async () => {  const seen = [];
+  const payload = await buildUpdatePayload({
+    originalNode: "vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=tls&sni=example.com&type=ws&host=example.com&path=%2Fws#原始节点",
+    manualText: "1.1.1.1\n2.2.2.2",
+    remoteSources: [],
+    checkOne: async () => ({ latency: 10, colo: "LAX", edgeVerified: true }),
+    downloadSpeedImpl: async (address, port, { servername, bytes, timeoutMs }) => {
+      seen.push({ address, port, servername, bytes, timeoutMs });
+      return address === "1.1.1.1" ? 88.8 : null;
+    },
+    now: new Date("2026-06-03T00:00:00.000Z"),
+  });
+  const bestIps = JSON.parse(payload.BEST_IPS);
+
+  assert.deepEqual(seen.map((item) => item.address).sort(), ["1.1.1.1", "2.2.2.2"]);
+  assert.equal(seen[0].bytes, 1000000);
+  assert.equal(seen[0].timeoutMs, 15000);
+  assert.equal(bestIps.find((node) => node.address === "1.1.1.1").speed, 88.8);
+  // 测速失败不阻断：保留原值（此处无 CSV speed，故为 null）
+  assert.equal(bestIps.find((node) => node.address === "2.2.2.2").speed, null);
+});
+
+test("P2-6 build update payload diverts IPv6 candidates to BEST_IPS_V6 untested", async () => {
+  const checkedAddresses = [];
+  const payload = await buildUpdatePayload({
+    originalNode: "vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=tls&sni=example.com&type=ws&host=example.com&path=%2Fws#原始节点",
+    manualText: "1.1.1.1\n2400:cb00::1",
+    remoteSources: [],
+    checkOne: async (address) => {
+      checkedAddresses.push(address);
+      return { latency: 10, colo: "LAX", edgeVerified: true };
+    },
+    downloadSpeedImpl: async () => null,
+    now: new Date("2026-06-03T00:00:00.000Z"),
+  });
+  const bestIps = JSON.parse(payload.BEST_IPS);
+  const v6Pool = JSON.parse(payload.BEST_IPS_V6);
+
+  // IPv6 不进 check（v4 该有的两轮探测都在）
+  assert.ok(checkedAddresses.length > 0);
+  assert.ok(checkedAddresses.every((address) => address === "1.1.1.1"));
+  assert.ok(bestIps.every((node) => !node.address.includes(":")));
+  assert.equal(v6Pool.length, 1);
+  assert.equal(v6Pool[0].address, "2400:cb00::1");
+  assert.equal(v6Pool[0].untested6, true);
+  assert.equal(v6Pool[0].port, 443);
+});
+
 test("build update payload keeps previous nodes when new result is too small", async () => {
   const previousBestIps = [{ address: "9.9.9.9", port: 443, name: "旧节点" }];
   const payload = await buildUpdatePayload({
@@ -257,6 +335,7 @@ test("build update payload keeps previous nodes when new result is too small", a
     previousBestIps,
     previousStatus: { consecutiveFallbacks: 2, lastSuccessfulRefreshAt: "2026-06-02T00:00:00.000Z" },
     checkOne: async () => ({ latency: 10, colo: "LAX", edgeVerified: true }),
+    downloadSpeedImpl: async () => null,
     now: new Date("2026-06-03T00:00:00.000Z"),
   });
   const bestIps = JSON.parse(payload.BEST_IPS);
@@ -281,6 +360,7 @@ test("build update payload keeps version index bounded", async () => {
     remoteSources: [],
     previousVersionIndex,
     checkOne: async (address) => ({ latency: Number(address.split(".").at(-1)), colo: "LAX", edgeVerified: true }),
+    downloadSpeedImpl: async () => null,
     now: new Date("2026-06-03T00:00:00.000Z"),
   });
 
@@ -291,8 +371,7 @@ test("build update payload keeps version index bounded", async () => {
   assert.deepEqual(expired, ["BEST_IPS_OLD_29", "BEST_IPS_OLD_30"]);
 });
 
-test("collect candidates records source health and rejects oversized source", async () => {
-  const result = await collectCandidatesWithHealth({
+test("collect candidates records source health and rejects oversized source", async () => {  const result = await collectCandidatesWithHealth({
     manualText: "1.1.1.1",
     remoteSources: [
       { name: "ok-source", url: "https://source.example/ok.txt" },
@@ -314,9 +393,114 @@ test("collect candidates records source health and rejects oversized source", as
   assert.equal(result.sourceHealth.find((item) => item.name === "bad-source").status, 500);
 });
 
+test("P0-1 collect candidates passes abort signal and isolates source failures", async () => {
+  const seenSignals = [];
+  const result = await collectCandidatesWithHealth({
+    manualText: "",
+    remoteSources: [
+      { name: "slow-fail", url: "https://source.example/slow.txt" },
+      { name: "fast", url: "https://source.example/fast.txt" },
+    ],
+    fetchImpl: async (url, init) => {
+      seenSignals.push(!!init?.signal);
+      if (url.includes("fast")) return new Response("9.9.9.9");
+      throw new Error("boom");
+    },
+  });
 
-test("build update payload honors source max bytes and version retention options", async () => {
-  const previousVersionIndex = ["BEST_IPS_A", "BEST_IPS_B", "BEST_IPS_C"];
+  assert.deepEqual(seenSignals, [true, true]);
+  assert.ok(result.candidates.some((item) => item.address === "9.9.9.9"));
+  assert.equal(result.sourceHealth.find((item) => item.name === "slow-fail").ok, false);
+  assert.equal(result.sourceHealth.find((item) => item.name === "slow-fail").error, "boom");
+  assert.equal(result.sourceHealth.find((item) => item.name === "fast").ok, true);
+});
+
+test("P0-1 collect candidates fetches remote sources in parallel", async () => {
+  const started = Date.now();
+  await collectCandidatesWithHealth({
+    manualText: "",
+    remoteSources: [
+      { name: "a", url: "https://source.example/a.txt" },
+      { name: "b", url: "https://source.example/b.txt" },
+    ],
+    fetchImpl: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return new Response("1.1.1.1");
+    },
+  });
+  const elapsed = Date.now() - started;
+  assert.ok(elapsed < 550, `expected parallel fetch (<550ms), took ${elapsed}ms`);
+});
+
+test("P0-1 collect candidates aborts a hanging source via timeout", async () => {
+  const result = await collectCandidatesWithHealth({
+    manualText: "",
+    remoteSources: [
+      { name: "hang", url: "https://source.example/hang.txt" },
+      { name: "fast", url: "https://source.example/fast.txt" },
+    ],
+    fetchImpl: (url, init) => {
+      if (url.includes("fast")) return Promise.resolve(new Response("8.8.8.8"));
+      return new Promise((_, reject) => {
+        // emulate AbortSignal.timeout firing without waiting 10s in test
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+        queueMicrotask(() => init?.signal?.dispatchEvent(new Event("abort")));
+      });
+    },
+  });
+
+  assert.ok(result.candidates.some((item) => item.address === "8.8.8.8"));
+  const hang = result.sourceHealth.find((item) => item.name === "hang");
+  assert.equal(hang.ok, false);
+  assert.match(hang.error, /abort/i);
+});
+
+test("P0-2 parseCsv finds columns by header name regardless of order", () => {
+  const csv = [
+    "速度(MB/s),数据中心,端口,IP地址,TLS",
+    "11.59,NRT,443,141.147.162.204,true",
+  ].join("\n");
+
+  const result = parseCsv(csv, "csv", 8);
+  assert.deepEqual(result, [{
+    address: "141.147.162.204",
+    port: 443,
+    source: "csv",
+    tls: true,
+    colo: "NRT",
+    speed: 11.59,
+  }]);
+});
+
+test("P0-2 parseCsv falls back to fixed indices when header is unknown", () => {
+  const csv = [
+    "a,b,c,d,e,f,g,h,i",
+    "141.147.162.204,443,443,true,NRT,xx,yy,zz,11.59",
+  ].join("\n");
+
+  const result = parseCsv(csv, "csv", 8);
+  assert.deepEqual(result, [{
+    address: "141.147.162.204",
+    port: 443,
+    source: "csv",
+    tls: true,
+    colo: "NRT",
+    speed: 11.59,
+  }]);
+});
+
+test("P0-2 parseCsv honors remarkColumn option", () => {
+  const csv = [
+    "IP地址,端口,回源端口,TLS,数据中心,城市,速度(MB/s)",
+    "141.147.162.204,443,443,true,NRT,Tokyo,11.59",
+  ].join("\n");
+
+  const result = parseCsv(csv, "csv", 0, { remarkColumn: 5 });
+  assert.equal(result[0].remark, "Tokyo");
+});
+
+
+test("build update payload honors source max bytes and version retention options", async () => {  const previousVersionIndex = ["BEST_IPS_A", "BEST_IPS_B", "BEST_IPS_C"];
   const payload = await buildUpdatePayload({
     originalNode: "vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=tls&sni=example.com&type=ws&host=example.com&path=%2Fws#原始节点",
     manualText: Array.from({ length: 20 }, (_, index) => `1.1.1.${index + 1}`).join("\n"),
@@ -326,6 +510,7 @@ test("build update payload honors source max bytes and version retention options
     versionRetention: 2,
     fetchImpl: async () => new Response("123456789", { status: 200 }),
     checkOne: async (address) => ({ latency: Number(address.split(".").at(-1)), colo: "LAX", edgeVerified: true }),
+    downloadSpeedImpl: async () => null,
     now: new Date("2026-06-03T00:00:00.000Z"),
   });
 

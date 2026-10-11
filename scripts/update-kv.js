@@ -3,7 +3,8 @@ import { parseVlessUri } from "../src/parser/vless.js";
 import { formatEdgeNodeName } from "../src/utils/colo.js";
 import { getPortsForSecurity } from "../src/utils/ports.js";
 import { checkCandidates } from "./lib/check.js";
-import { collectCandidatesWithHealth } from "./lib/candidates.js";
+import { collectCandidatesWithHealth, isIPv6 } from "./lib/candidates.js";
+import { downloadSpeed } from "./lib/speed.js";
 import { runAlertStage } from "./lib/alert.js";
 import { deleteKvValue, readKvValue, writeKvValue } from "./lib/kv.js";
 
@@ -12,6 +13,71 @@ const MIN_AVAILABLE_TO_OVERWRITE = 20;
 const DEFAULT_VERSION_RETENTION = 30;
 // KV 里存的是"过审池"而不是发给所有人的固定前 50 名；订阅端从池里抽样，池要够大才有轮换空间
 const MAX_POOL_NODES = 300;
+// P2-6: 未实测 IPv6 独立池上限
+const MAX_V6_NODES = 100;
+// P2-10: GHA 带宽抽测参数（只测 Top N，不对全池测）
+const BANDWIDTH_TOP_N = 30;
+const BANDWIDTH_BYTES = 1000000;
+const BANDWIDTH_CONCURRENCY = 2;
+const BANDWIDTH_TIMEOUT_MS = 15000;
+
+// P2-6: IPv6 候选不进 check（GHA 无 v6 出口，测了也全超时），单独收进未实测池
+function buildV6Pool(v6Candidates) {
+  const seen = new Set();
+  const nodes = [];
+  for (const candidate of v6Candidates) {
+    const port = candidate.port || 443;
+    const key = `${candidate.address}:${port}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    nodes.push({
+      address: candidate.address,
+      port,
+      ports: [port],
+      name: "",
+      latency: null,
+      speed: null,
+      colo: "",
+      edgeVerified: false,
+      source: candidate.source,
+      untested6: true,
+    });
+  }
+  return nodes.slice(0, MAX_V6_NODES).map((node, index) => ({ ...node, name: edgeName(node, index) }));
+}
+
+// P2-10: 优先用本轮实测带宽，其次保留候选自带 speed（CSV），都没有则 null
+function pickSpeed(item) {
+  const measured = Number(item.measuredSpeed);
+  if (Number.isFinite(measured) && measured > 0) return measured;
+  if (item.speed == null) return null;
+  const fallback = Number(item.speed);
+  return Number.isFinite(fallback) ? fallback : null;
+}
+
+// P2-10: 对入池 Top N 做带宽抽测；成功则记 measuredSpeed，失败不阻断（保留原有 speed）
+async function measureTopBandwidth(nodes, { servername, downloadSpeedImpl = downloadSpeed }) {
+  const targets = nodes.slice(0, BANDWIDTH_TOP_N);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < targets.length) {
+      const node = targets[cursor];
+      cursor += 1;
+      try {
+        const speed = await downloadSpeedImpl(node.address, node.port, {
+          servername,
+          bytes: BANDWIDTH_BYTES,
+          timeoutMs: BANDWIDTH_TIMEOUT_MS,
+        });
+        if (Number.isFinite(speed) && speed > 0) node.measuredSpeed = speed;
+      } catch {
+        // 失败不阻断：保留原有 speed
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(BANDWIDTH_CONCURRENCY, targets.length) }, worker));
+  return nodes;
+}
 
 async function readJsonFile(path, fallback) {
   try {
@@ -57,6 +123,8 @@ export function aggregateCheckedResults(checked) {
       colo: preferred.colo || results.find((item) => item.colo)?.colo || "",
       edgeVerified: results.some((item) => item.edgeVerified),
       source: preferred.source || results[0]?.source,
+      // P1-8: 抖动透传（优选端口的采样值，缺失时取任一可用值）
+      jitter: preferred.jitter ?? results.find((item) => item.jitter != null)?.jitter ?? null,
     };
   });
 }
@@ -116,6 +184,7 @@ export async function buildUpdatePayload({
   previousVersionIndex = [],
   checkOne,
   fetchImpl,
+  downloadSpeedImpl,
   now = new Date(),
   requireCfRay = true,
   allowTcpOnly = false,
@@ -125,26 +194,45 @@ export async function buildUpdatePayload({
 } = {}) {
   const templateValue = originalNode.trim();
   const template = parseVlessUri(templateValue);
-  const { candidates, sourceHealth } = await collectCandidatesWithHealth({ manualText, remoteSources, fetchImpl, maxSourceBytes });
-  const checked = await checkCandidates(candidates, getPortsForSecurity(template.security), {
+  const { candidates: allCandidates, sourceHealth } = await collectCandidatesWithHealth({ manualText, remoteSources, fetchImpl, maxSourceBytes });
+  // P2-6: IPv6 单独分流，不进 check
+  const v6Candidates = [];
+  const candidates = [];
+  for (const candidate of allCandidates) {
+    (isIPv6(candidate.address) ? v6Candidates : candidates).push(candidate);
+  }
+  const v6Pool = buildV6Pool(v6Candidates);
+  const checkParams = {
+    host: template.host || template.sni || template.address,
+    tlsEnabled: template.security === "tls",
+  };
+  const checked = await checkCandidates(candidates, getPortsForSecurity(template.security, process.env), {
     checkOne,
-    checkOptions: {
-      host: template.host || template.sni || template.address,
-      tlsEnabled: template.security === "tls",
-    },
+    checkOptions: checkParams,
     requireCfRay,
     allowTcpOnly,
   });
-  const nextBestIps = aggregateCheckedResults(checked).slice(0, poolLimit).map((item, index) => ({
+  const aggregated = aggregateCheckedResults(checked).slice(0, poolLimit);
+  // P1-8: 第二轮抖动采样——只对入池候选的优选端口测 3 次，不对全量候选 3 倍探测
+  const jitterSamples = await checkCandidates(
+    aggregated.map((item) => ({ address: item.address, port: item.port, source: item.source })),
+    [],
+    { checkOne, checkOptions: checkParams, requireCfRay, allowTcpOnly, jitterSamples: 3, concurrency: 10 },
+  );
+  const jitterByAddress = new Map(jitterSamples.map((item) => [item.address, item.jitter ?? null]));
+  // P2-10: 带宽抽测（Top 30），结果写回 measuredSpeed；失败不阻断
+  await measureTopBandwidth(aggregated, { servername: checkParams.host, downloadSpeedImpl });
+  const nextBestIps = aggregated.map((item, index) => ({
     address: item.address,
     port: item.port,
     ports: item.ports,
     name: edgeName(item, index),
     latency: item.latency,
-    speed: item.speed == null ? null : (Number.isFinite(Number(item.speed)) ? Number(item.speed) : null),
+    speed: pickSpeed(item),
     colo: item.colo,
     edgeVerified: item.edgeVerified,
     source: item.source,
+    jitter: jitterByAddress.has(item.address) ? jitterByAddress.get(item.address) : null,
   }));
   const protectedByPrevious = nextBestIps.length < MIN_AVAILABLE_TO_OVERWRITE && Array.isArray(previousBestIps) && previousBestIps.length > 0;
   const bestIps = protectedByPrevious ? previousBestIps : nextBestIps;
@@ -177,6 +265,7 @@ export async function buildUpdatePayload({
   return {
     TEMPLATE: templateValue,
     BEST_IPS: JSON.stringify(bestIps, null, 2),
+    BEST_IPS_V6: JSON.stringify(v6Pool, null, 2),
     [versionKey]: JSON.stringify(bestIps, null, 2),
     BEST_IPS_LAST: JSON.stringify(bestIps, null, 2),
     BEST_IPS_LATEST_VERSION: versionKey,

@@ -58,11 +58,13 @@ export function formatEdgeNodeName(node, index, options = {}) {
   const measured = node.userRtt != null && Number.isFinite(Number(node.userRtt))
     ? Math.round(Number(node.userRtt))
     : null;
+  // P2-6: 保留 [IPv6] 标记（抽样模式重命名时也不丢）
+  const v6Prefix = String(node.name || "").startsWith("[IPv6] ") ? "[IPv6] " : "";
   // 抽样模式下节点名不再沿用存量名称（其中嵌着美国测速机的延迟），改为按落点现生成
   if (measured === null && !options.hideLatency && shouldKeepName(node.name)) return node.name;
   const location = formatColo(node.userColo || node.colo) || "🌐 未识别地区";
   const latency = measured !== null
     ? ` ${measured}ms 实测`
     : (options.hideLatency ? "" : (Number.isFinite(Number(node.latency)) ? ` ${node.latency}ms` : ""));
-  return `${location}${latency} #${index + 1}`;
+  return `${v6Prefix}${location}${latency} #${index + 1}`;
 }

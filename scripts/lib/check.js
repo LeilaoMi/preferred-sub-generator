@@ -128,7 +128,15 @@ function normalizeCheckResult(result) {
   return null;
 }
 
-export async function checkCandidates(candidates, ports, { checkOne = checkEdge, concurrency = 20, checkOptions = {}, requireCfRay = false, allowTcpOnly = true } = {}) {
+// P1-8: 抖动 = 多次延迟采样的标准差；<2 个样本时记 0
+function latencyJitter(latencies) {
+  if (!Array.isArray(latencies) || latencies.length < 2) return 0;
+  const mean = latencies.reduce((sum, value) => sum + value, 0) / latencies.length;
+  const variance = latencies.reduce((sum, value) => sum + (value - mean) ** 2, 0) / latencies.length;
+  return Math.round(Math.sqrt(variance) * 10) / 10;
+}
+
+export async function checkCandidates(candidates, ports, { checkOne = checkEdge, concurrency = 20, checkOptions = {}, requireCfRay = false, allowTcpOnly = true, jitterSamples = 1 } = {}) {
   const tasks = [];
   for (const candidate of candidates) {
     const candidatePorts = candidate.port ? [candidate.port] : ports;
@@ -137,14 +145,27 @@ export async function checkCandidates(candidates, ports, { checkOne = checkEdge,
     }
   }
 
+  const sampleCount = Math.max(1, Math.floor(Number(jitterSamples) || 1));
   const results = [];
   let cursor = 0;
+
+  async function checkTaskSamples(task) {
+    const latencies = [];
+    let best = null;
+    for (let i = 0; i < sampleCount; i += 1) {
+      const checked = normalizeCheckResult(await checkOne(task.address, task.port, { ...checkOptions, requireCfRay, allowTcpOnly }));
+      if (!checked) return null;
+      if (!best || checked.latency < best.latency) best = checked;
+      latencies.push(checked.latency);
+    }
+    return { ...best, jitter: latencyJitter(latencies) };
+  }
 
   async function worker() {
     while (cursor < tasks.length) {
       const task = tasks[cursor];
       cursor += 1;
-      const checked = normalizeCheckResult(await checkOne(task.address, task.port, { ...checkOptions, requireCfRay, allowTcpOnly }));
+      const checked = await checkTaskSamples(task);
       if (checked) {
         if (requireCfRay && !checked.edgeVerified && !allowTcpOnly) continue;
         results.push({ ...task, ...checked });

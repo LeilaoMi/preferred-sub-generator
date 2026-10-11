@@ -5,6 +5,7 @@ function stripComment(line) {
 const DEFAULT_CIDR_SAMPLES = 4;
 const DEFAULT_CSV_MIN_SPEED = 0;
 const DEFAULT_MAX_SOURCE_BYTES = 5 * 1024 * 1024;
+const DEFAULT_SOURCE_TIMEOUT_MS = 10000;
 
 function parseUrlCandidate(value) {
   try {
@@ -20,7 +21,7 @@ function normalizeAddress(value) {
   return String(value || "").replace(/^\[|\]$/g, "");
 }
 
-function isIPv6(value) {
+export function isIPv6(value) {
   const normalized = normalizeAddress(value);
   return normalized.includes(":") && /^[0-9a-fA-F:.]+$/.test(normalized);
 }
@@ -192,17 +193,42 @@ function parseText(text, source, maxCidrSamples = DEFAULT_CIDR_SAMPLES) {
   return candidates;
 }
 
-function parseCsv(text, source, minSpeed = DEFAULT_CSV_MIN_SPEED) {
+function findHeaderIndex(header, names) {
+  const normalized = header.map((cell) => String(cell || "").trim().toLowerCase());
+  for (const name of names) {
+    const index = normalized.indexOf(String(name).toLowerCase());
+    if (index >= 0) return index;
+  }
+  return -1;
+}
+
+function resolveColumnIndex(header, names, fallbackIndex) {
+  const found = findHeaderIndex(header, names);
+  return found >= 0 ? found : fallbackIndex;
+}
+
+// P0-2: 按表头名定位列，找不到表头时回退固定索引，避免上游 CSV 加列导致静默错位
+export function parseCsv(text, source, minSpeed = DEFAULT_CSV_MIN_SPEED, options = {}) {
   const rows = String(text || "").trim().split(/\r?\n/);
   if (rows.length < 2) return [];
 
+  const header = rows[0].split(",").map((column) => column.trim());
+  const addressIndex = resolveColumnIndex(header, ["ip", "ip地址", "address", "host"], 0);
+  const portIndex = resolveColumnIndex(header, ["port", "端口"], 1);
+  const tlsIndex = resolveColumnIndex(header, ["tls"], 3);
+  const coloIndex = resolveColumnIndex(header, ["datacenter", "数据中心", "colo"], 4);
+  const speedIndex = resolveColumnIndex(header, ["speed", "速度", "速度(mb/s)", "mb/s"], header.length - 1);
+  const remarkIndex = typeof options.remarkColumn === "number"
+    ? options.remarkColumn
+    : resolveColumnIndex(header, ["remark", "备注", "城市", "city"], -1);
+
   return rows.slice(1).flatMap((row) => {
     const columns = row.split(",").map((column) => column.trim());
-    const address = columns[0];
-    const port = Number(columns[1]);
-    const tls = columns[3];
-    const colo = columns[4];
-    const speed = Number(columns.at(-1));
+    const address = columns[addressIndex];
+    const port = Number(columns[portIndex]);
+    const tls = columns[tlsIndex];
+    const colo = columns[coloIndex];
+    const speed = Number(columns[speedIndex]);
 
     if (!address || !Number.isFinite(port) || port <= 0 || port > 65535) return [];
     if (Number.isFinite(speed) && speed < minSpeed) return [];
@@ -214,6 +240,7 @@ function parseCsv(text, source, minSpeed = DEFAULT_CSV_MIN_SPEED) {
       tls: String(tls).toLowerCase() === "true",
       colo: colo || "",
       speed: Number.isFinite(speed) ? speed : null,
+      ...(remarkIndex >= 0 && columns[remarkIndex] ? { remark: columns[remarkIndex] } : {}),
     }];
   });
 }
@@ -292,44 +319,65 @@ async function readResponseText(response, maxBytes) {
   return new TextDecoder().decode(merged);
 }
 
+async function fetchRemoteSource(source, { fetchImpl, maxSourceBytes }) {
+  const url = typeof source === "string" ? source : source.url;
+  const sourceName = getSourceName(source, url);
+  const startedAt = Date.now();
+  const fail = (error, status = 0) => ({
+    health: { name: sourceName, ok: false, status, candidates: 0, ms: Date.now() - startedAt, error },
+    candidates: [],
+  });
+  if (!url) return fail("missing url");
+
+  try {
+    // P0-1: 单源超时，挂掉的源不拖死整轮抓取；signal 透传给 fetchImpl，mock 忽略多余参数也不会炸
+    const signal = typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(DEFAULT_SOURCE_TIMEOUT_MS) : undefined;
+    const response = await fetchImpl(url, signal ? { signal } : undefined);
+    if (!response.ok) {
+      return fail(`HTTP ${response.status}`, response.status);
+    }
+
+    const body = await readResponseText(response, getMaxBytes(source, maxSourceBytes));
+    const maxCidrSamples = typeof source === "object" && source.cidrSamples ? Number(source.cidrSamples) : DEFAULT_CIDR_SAMPLES;
+    const minSpeed = typeof source === "object" && source.minSpeed ? Number(source.minSpeed) : DEFAULT_CSV_MIN_SPEED;
+    const sourceType = getSourceType(source, url);
+    let parsed;
+
+    if (sourceType === "csv") {
+      const remarkColumn = typeof source === "object" && typeof source.remarkColumn === "number" ? source.remarkColumn : undefined;
+      parsed = parseCsv(body, sourceName, minSpeed, { remarkColumn });
+    } else {
+      try {
+        parsed = parseJson(body, sourceName, maxCidrSamples);
+      } catch {
+        parsed = parseText(body, sourceName, maxCidrSamples);
+      }
+    }
+
+    return {
+      health: { name: sourceName, ok: true, status: response.status, candidates: parsed.length, ms: Date.now() - startedAt },
+      candidates: parsed,
+    };
+  } catch (error) {
+    return fail(error.message);
+  }
+}
+
 export async function collectCandidatesWithHealth({ manualText = "", remoteSources = [], fetchImpl = fetch, maxSourceBytes = DEFAULT_MAX_SOURCE_BYTES } = {}) {
   const manualCandidates = parseText(manualText, "edge-manual");
   const candidates = [...manualCandidates];
   const sourceHealth = [{ name: "edge-manual", ok: true, status: 200, candidates: manualCandidates.length, ms: 0 }];
 
-  for (const source of remoteSources) {
-    const url = typeof source === "string" ? source : source.url;
-    if (!url) continue;
-
-    const sourceName = getSourceName(source, url);
-    const startedAt = Date.now();
-    try {
-      const response = await fetchImpl(url);
-      if (!response.ok) {
-        sourceHealth.push({ name: sourceName, ok: false, status: response.status, candidates: 0, ms: Date.now() - startedAt, error: `HTTP ${response.status}` });
-        continue;
-      }
-
-      const body = await readResponseText(response, getMaxBytes(source, maxSourceBytes));
-      const maxCidrSamples = typeof source === "object" && source.cidrSamples ? Number(source.cidrSamples) : DEFAULT_CIDR_SAMPLES;
-      const minSpeed = typeof source === "object" && source.minSpeed ? Number(source.minSpeed) : DEFAULT_CSV_MIN_SPEED;
-      const sourceType = getSourceType(source, url);
-      let parsed;
-
-      if (sourceType === "csv") {
-        parsed = parseCsv(body, sourceName, minSpeed);
-      } else {
-        try {
-          parsed = parseJson(body, sourceName, maxCidrSamples);
-        } catch {
-          parsed = parseText(body, sourceName, maxCidrSamples);
-        }
-      }
-
-      candidates.push(...parsed);
-      sourceHealth.push({ name: sourceName, ok: true, status: response.status, candidates: parsed.length, ms: Date.now() - startedAt });
-    } catch (error) {
-      sourceHealth.push({ name: sourceName, ok: false, status: 0, candidates: 0, ms: Date.now() - startedAt, error: error.message });
+  // P0-1: 并行抓取所有远程源，单源失败只记 health 不阻断；顺序与输入一致
+  const settled = await Promise.allSettled(
+    remoteSources.map((source) => fetchRemoteSource(source, { fetchImpl, maxSourceBytes })),
+  );
+  for (const entry of settled) {
+    if (entry.status === "fulfilled") {
+      candidates.push(...entry.value.candidates);
+      sourceHealth.push(entry.value.health);
+    } else {
+      sourceHealth.push({ name: "unknown", ok: false, status: 0, candidates: 0, ms: 0, error: entry.reason?.message || String(entry.reason) });
     }
   }
 

@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { filterNodesByColo, preferredPort, rankNodesByScore, sampleNodes, sampleWeight, withPreferredPort } from "../src/api/node-filter.js";
+import { computeNodeScore, filterNodesByColo, preferredPort, rankNodesByScore, readScoreOptions, sampleNodes, sampleWeight, withPreferredPort } from "../src/api/node-filter.js";
+import { getPortsForSecurity, getPreferredPortOrder } from "../src/utils/ports.js";
 
 const nodes = [
   { address: "1.1.1.1", port: 8443, colo: "LAX", latency: 20 },
@@ -72,4 +73,52 @@ test("rankNodesByScore still puts measured nodes first (legacy path unchanged)",
 
   assert.equal(ranked[0].address, "3.3.3.3");
   assert.equal(ranked[0].userRtt, 9);
+});
+
+test("P1-9 rankNodesByScore drops nodes above the rtt threshold", () => {
+  const scores = new Map([
+    ["1.1.1.1", { rtt: 50, unreachable: false }],
+    ["2.2.2.2", { rtt: 5000, unreachable: false }],
+  ]);
+  const ranked = rankNodesByScore(nodes, scores);
+  assert.deepEqual(ranked.map((node) => node.address), ["1.1.1.1", "2.2.2.2", "3.3.3.3", "4.4.4.4"]);
+
+  const ranked2 = rankNodesByScore(nodes, scores, { rttDropMs: 10000 });
+  assert.equal(ranked2[0].address, "1.1.1.1");
+  assert.equal(ranked2[1].address, "2.2.2.2");
+});
+
+test("P2-11 computeNodeScore penalizes jitter and rewards speed", () => {
+  const base = { rtt: 50, speed: 10, colo: "HKG", unreachable: false };
+  const calm = computeNodeScore({ address: "a", jitter: 5 }, base);
+  const jitty = computeNodeScore({ address: "b", jitter: 400 }, base);
+  assert.ok(calm > jitty);
+
+  const fast = computeNodeScore({}, { rtt: 50, speed: 90, unreachable: false });
+  const slow = computeNodeScore({}, { rtt: 50, speed: 5, unreachable: false });
+  assert.ok(fast > slow);
+});
+
+test("P2-11 readScoreOptions reads SUB_SCORE_W_* env overrides", () => {
+  const opts = readScoreOptions({ SUB_SCORE_W_SPEED: "2.5", SUB_RTT_DROP_MS: "2000", SUB_SCORE_W_RTT: "bogus" });
+  assert.equal(opts.wS, 2.5);
+  assert.equal(opts.rttDropMs, 2000);
+  assert.equal(opts.wR, 2.0);
+});
+
+test("P1-3 getPortsForSecurity honors SUB_PREFERRED_PORTS override", () => {
+  assert.deepEqual(getPortsForSecurity("tls", { SUB_PREFERRED_PORTS: "8443,443,2053" }), [8443, 443, 2053]);
+  assert.deepEqual(getPortsForSecurity("tls", {}), [443, 8443, 2053, 2083, 2087, 2096]);
+  assert.deepEqual(getPortsForSecurity("none", {}), [80, 8080, 8880, 2052, 2082, 2086, 2095]);
+  assert.equal(getPreferredPortOrder({}), null);
+  assert.equal(getPreferredPortOrder({ SUB_PREFERRED_PORTS: "bogus" }), null);
+});
+
+test("P1-3 preferredPort follows custom port order when provided", () => {
+  const node = { address: "1.1.1.1", port: 443, ports: [443, 8443, 2053] };
+  assert.equal(preferredPort(node), 443);
+  assert.equal(preferredPort(node, [8443, 443]), 8443);
+  assert.equal(withPreferredPort(node, [2053]).port, 2053);
+  // 覆盖顺序里没有的端口回退到原逻辑
+  assert.equal(preferredPort({ address: "1.1.1.1", port: 2087, ports: [2087] }, [8443]), 2087);
 });

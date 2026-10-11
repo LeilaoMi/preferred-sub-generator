@@ -33,6 +33,7 @@ function createEnv() {
     ["TEMPLATE", template],
     ["BEST_IPS", JSON.stringify(bestIps)],
     ["STATUS", JSON.stringify(status)],
+    ["BEST_IPS_V6", JSON.stringify([{ address: "2400:cb00::1", port: 443, ports: [443], name: "v6节点", untested6: true }])],
     ["BEST_IPS_VERSION_INDEX", JSON.stringify([
       { key: "BEST_IPS_20260603T000000Z", version: "20260603T000000Z", updatedAt: "2026-06-03T00:00:00.000Z", total: 60 },
       { key: "BEST_IPS_20260602T180000Z", version: "20260602T180000Z", updatedAt: "2026-06-02T18:00:00.000Z", total: 55 },
@@ -256,6 +257,69 @@ test("sub generates Sing-box subscription with localized generated names", async
   assert.equal(parsed.outbounds.length, 1);
   assert.equal(parsed.outbounds[0].server, "1.1.1.1");
   assert.equal(parsed.outbounds[0].tag, expectedGeneratedName);
+});
+
+test("P1-4 sub responses carry Subscription-Userinfo header", async () => {
+  const response = await handleSub(subRequest("/sub?type=vless&n=1"), createEnv());
+  const userinfo = response.headers.get("Subscription-Userinfo");
+
+  assert.equal(response.status, 200);
+  assert.match(userinfo, /^upload=0; download=107374182400; total=107374182400; expire=\d+$/);
+  const expire = Number(userinfo.split("expire=")[1]);
+  const nowSec = Math.floor(Date.now() / 1000);
+  assert.ok(expire > nowSec + 29 * 24 * 3600 && expire <= nowSec + 31 * 24 * 3600);
+});
+
+test("P1-5 sub infers clash format from client UA when type is missing", async () => {
+  const request = new Request("https://example.com/sub?n=1", {
+    headers: { "User-Agent": "ClashForWindows/0.20.39" },
+  });
+  const response = await handleSub(request, createPublicEnv());
+  const text = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(text, /^proxies:/m);
+});
+
+test("P1-5 sub infers sing-box format from client UA when type is missing", async () => {
+  const request = new Request("https://example.com/sub?n=1", {
+    headers: { "User-Agent": "sing-box/1.10.0" },
+  });
+  const response = await handleSub(request, createPublicEnv());
+  const parsed = JSON.parse(await response.text());
+
+  assert.equal(response.status, 200);
+  assert.ok(Array.isArray(parsed.outbounds));
+});
+
+test("P1-5 explicit type parameter beats UA inference", async () => {
+  const request = new Request("https://example.com/sub?type=vless&n=1", {
+    headers: { "User-Agent": "ClashForWindows/0.20.39" },
+  });
+  const response = await handleSub(request, createPublicEnv());
+  const text = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(text, /^vless:\/\//);
+});
+
+test("P1-5 sub falls back to vless when UA is unknown", async () => {
+  const response = await handleSub(subRequest("/sub?n=1"), createEnv());
+  const text = await response.text();
+
+  assert.equal(response.status, 200);
+  assert.match(text, /^vless:\/\//);
+});
+
+test("P2-6 sub excludes IPv6 pool by default, includes with ?ip6=1", async () => {
+  const plain = await handleSub(subRequest("/sub?type=vless&n=100"), createEnv());
+  const plainText = await plain.text();
+  assert.ok(!plainText.includes("2400:cb00::1"));
+
+  const withV6 = await handleSub(subRequest("/sub?type=vless&n=100&ip6=1"), createEnv());
+  const v6Text = await withV6.text();
+  assert.ok(v6Text.includes("[2400:cb00::1]:443"));
+  assert.match(v6Text, /#%5BIPv6%5D/);
 });
 
 

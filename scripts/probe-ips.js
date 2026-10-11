@@ -2,9 +2,9 @@
 import fs from "node:fs/promises";
 import net from "node:net";
 import tls from "node:tls";
-import https from "node:https";
 import { parseArgs } from "node:util";
 import { filterNodesByColo, parseColoFilter } from "../src/api/node-filter.js";
+import { downloadSpeed } from "./lib/speed.js";
 
 const HELP = `用法: node scripts/probe-ips.js [选项]
 
@@ -79,45 +79,6 @@ function traceEdge(address, port, { servername, timeoutMs }) {
     socket.once("end", () => finish(parseTrace(buffer)));
     socket.once("timeout", () => finish(null));
     socket.once("error", () => finish(null));
-  });
-}
-
-function downloadSpeed(address, port, { servername, bytes, timeoutMs }) {
-  return new Promise((resolve) => {
-    const request = https.request({
-      host: address,
-      port,
-      servername,
-      method: "GET",
-      path: `/__down?bytes=${bytes}`,
-      headers: { Host: servername, "Accept-Encoding": "identity" },
-      rejectUnauthorized: false,
-      timeout: timeoutMs,
-    }, (response) => {
-      if (response.statusCode >= 400) {
-        response.resume();
-        resolve(null);
-        return;
-      }
-      let received = 0;
-      let startedAt = null;
-      response.on("data", (chunk) => {
-        if (startedAt === null) startedAt = Date.now();
-        received += chunk.length;
-      });
-      response.on("end", () => {
-        if (startedAt === null || received <= 0) {
-          resolve(null);
-          return;
-        }
-        const elapsed = (Date.now() - startedAt) / 1000;
-        resolve(elapsed > 0 ? Math.round(((received * 8) / (elapsed * 1000000)) * 100) / 100 : null);
-      });
-      response.on("error", () => resolve(null));
-    });
-    request.on("timeout", () => request.destroy(new Error("timeout")));
-    request.on("error", () => resolve(null));
-    request.end();
   });
 }
 

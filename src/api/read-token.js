@@ -1,4 +1,4 @@
-import { requireAuth } from "../security/auth.js";
+import { deriveReadToken, requireAuth } from "../security/auth.js";
 import { jsonResponse } from "../utils/response.js";
 
 export async function handleReadToken(request, env) {
@@ -14,5 +14,6 @@ export async function handleReadToken(request, env) {
     return jsonResponse({ configured: true });
   }
 
-  return jsonResponse({ configured: true, readToken });
+  // P2-7: 轮换开启时下发派生 token（当期有效），否则下发静态 token
+  return jsonResponse({ configured: true, readToken: await deriveReadToken(env) });
 }

@@ -5,7 +5,7 @@ import { readBestIpVersions } from "./kv.js";
 const MAX_VERSIONS = 100;
 
 export async function handleVersions(request, env) {
-  const auth = requireReadAuth(request, env);
+  const auth = await requireReadAuth(request, env);
   if (!auth.authorized) return unauthorizedResponse();
 
   const url = new URL(request.url);
