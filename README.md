@@ -14,16 +14,22 @@
 - 自动识别并保留：UUID、端口、TLS、WS、Host、SNI、path、节点备注等参数。
 - 自动聚合 Cloudflare Edge 候选源（当前默认只保留 Cloudflare 官方源，避免第三方源混入中转 IP）：
   - Cloudflare 官方 IPv4 CIDR（`https://www.cloudflare.com/ips-v4/`）。
-  - Cloudflare 官方 IPv6 CIDR（`https://www.cloudflare.com/ips-v6/`），支持 IPv6 边缘 IP 优选。
+  - Cloudflare 官方 IPv6 CIDR（`https://www.cloudflare.com/ips-v6/`）。
   - 本地手动源 `sources/edge/manual.txt`。
   - 可按需在 `sources/edge/remote.json` 自行添加 cmliu/amclubs 等社区源（注意区分 CF 边缘 IP 与中转 IP）。
-- 自动检测候选 IP 的可达性、延迟和 Cloudflare COLO。
-- 扫描只做"资格审查"，不发榜：GitHub Actions 用**你的模板域名**当 SNI 逐个直连候选 IP，要求返回 2xx（含 cf-ray）才算过审；过审结果按 IP 地址聚合为"过审池"写入 KV（单个 IP 记下全部过审端口，池上限 300）。官方网段每个 CIDR 抽 16 个样本。
+- 候选源并行抓取：多源同时拉取，单源 10 秒超时隔离，一个源挂掉不拖慢整轮刷新；每源健康状态记入 `SOURCE_HEALTH`。
+- CSV 源按表头解析：按列名（ip/端口/tls/速度/数据中心）定位，不再依赖固定列顺序；上游加列不再静默错位。
+- 自动检测候选 IP 的可达性、延迟、抖动和 Cloudflare COLO：每个候选测 3 次取延迟抖动（标准差），抖动大的节点在排序中被惩罚。
+- 扫描只做"资格审查"，不发榜：GitHub Actions 用**你的模板域名**当 SNI 逐个直连候选 IP，要求返回 2xx（含 cf-ray）才算过审；rtt 超过 1000ms（`SUB_RTT_DROP_MS` 可配）直接淘汰；过审结果按 IP 地址聚合为"过审池"写入 KV（单个 IP 记下全部过审端口，池上限 300）。官方网段每个 CIDR 抽 16 个样本。
+- 节点排序用多维加权评分公式：`score = (wS·带宽 + wC·落点加成 + 0.1) / (1 + wR·延迟 + wJ·抖动)`，各维度归一化，权重经 `SUB_SCORE_W_*` 环境变量可调；rtt 只做淘汰门槛，不再主导排名（美国扫描机的握手延迟不代表你的真实体验）。
+- 抽样模式（`mode=sample`）与固定榜共用同一评分公式做加权随机抽样。
 - 订阅有两种发法：默认是固定榜（历史行为）；`mode=sample` 是抽样模式——先按落点分桶，再从池里加权随机抽，每次拉取换一批，本地实测只提高被抽中权重、不再决定名次。
 - 抽样模式细节：节点端口优先 443；节点名不再印美国扫描机的延迟（有本地实测才标 `实测`）；Clash / Sing-box 输出附带自动测速组，客户端连接时自己挑活的。
 - edgetunnel 探测旁路每次从池里抽样 **30** 个 IP 发出去（edgetunnel 每次生成订阅都会来拉，天然轮换），端口走 443 优先（该 IP 过审端口含 443 就发 443；国内运营商对 2053/2083 等非标准端口建连超时的概率明显高于 443）。
 - 提供浏览器本地测速反馈面板：首页「开始测速」按钮在用户浏览器本地通过 Cloudflare 官方端点 `speed.cloudflare.com/__down` 实测下载速度，结果回传 `/api/speedtest-feedback` 存入 D1（未绑定时回退 KV），可用于验证国内真实访问质量；`/admin.html` 提供按天趋势面板。
-- `/status` 会标注测速地点（`speedtestLocation`，当前为 `GitHub Actions (US)`）、平均延迟（`averageLatency`）和平均带宽（`averageSpeed`；GitHub Actions 环境不做带宽测速，当前实际为 `null`，国内真实速度请用首页「开始测速」或本地探测脚本）。
+- `/status` 标注测速地点（`speedtestLocation`，当前为 `GitHub Actions (US)`）、平均延迟（`averageLatency`）和平均带宽（`averageSpeed`；每 6 小时对 Top 30 过审节点主动抽测带宽，结果写入 KV）。
+- 订阅响应带 `Subscription-Userinfo` 头，客户端订阅页正常显示流量与有效期，不再空白。
+- `type` 参数缺省时按客户端 UA 自动识别格式（Clash/Mihomo/Sing-box/Shadowrocket/v2rayNG），裸域名可直接当订阅地址用；显式 `?type=` 优先。
 - 订阅节点名称支持中文友好 COLO 展示。默认（固定榜）例如：
 
 ```text
@@ -35,6 +41,8 @@
 抽样模式（`mode=sample`）下不再印美国扫描机的延迟，例如 `🇺🇸 美国洛杉矶 LAX #1`。
 - 节点名里出现 `28ms 实测` 时，COLO 和延迟来自**你本机的实测**（`scripts/probe-ips.js` 回传的数据），而不是美国扫描机看到的数字。
 - 订阅支持按线路过滤：`/sub?colo=HKG`、`/best?colo=auto`（`auto` = 你当前接入点），无匹配时自动回退全量，订阅不会变空。
+- IPv6 独立通道：IPv6 候选不再因无 v6 测速环境被一刀切丢弃，收录进独立池 `BEST_IPS_V6`（标记未实测），`/sub?ip6=1` 追加返回，节点名带 `[IPv6]` 前缀，不占常规名额。
+- 端口优先级可配：`SUB_PREFERRED_PORTS` 环境变量覆盖端口顺序（默认 443 优先，基于国内运营商实测）；换线路不用改代码。
 - 支持在本机探测每个候选 IP 的 TCP 握手延迟、落地 COLO 和下载带宽，回传 `/api/ip-feedback` 后：默认订阅按你的实测结果重排，抽样模式下则按实测加权抽样——这是让代理真正变快的关键一步。
 - 本地探测默认用**订阅模板的域名**当探测 SNI（`--slot` 选账号槽位、`--sni` 覆盖），因此能识别出「IP 活着但不服务你的 zone」的 `error code: 1034` 节点；这类节点会带 `ok:false` 回传，订阅生成时自动剔除（失败多于成功才剔，剔完为空则回退全量）。
 - 首页状态卡显示「你的接入点」和「你的延迟」（你到 Cloudflare 边缘的真实 RTT，3 次取最小）。
@@ -129,7 +137,7 @@ KV 里 `BEST_IPS` 现在是过审 IP 池（按地址聚合，含各 IP 全部过
 `.github/workflows/update.yml` 每 6 小时定时刷新 KV（不负责部署页面）：
 
 ```text
-抓取候选源 → 检测可用 CF Edge → 写入 BEST_IPS 和 STATUS
+抓取候选源（并行，单源 10s 超时） → 检测可用 CF Edge（含抖动多采样）→ Top 30 带宽抽测 → 写入 BEST_IPS / BEST_IPS_V6 和 STATUS
 ```
 
 `.github/workflows/deploy-pages.yml` 在 push 到 `main` 时自动部署到 Cloudflare Pages（`wrangler pages deploy public`，用仓库 Secrets 里的 `CLOUDFLARE_API_TOKEN_2` / `CLOUDFLARE_ACCOUNT_ID`）。改完代码 push 即可上线，不用再手动跑 wrangler。
@@ -172,8 +180,9 @@ src/api/speedtest-feedback.js    测速反馈接收与汇总
 src/api/speedtest-db.js          测速反馈存储抽象（D1 优先，KV 回退）与按天聚合
 scripts/update-kv.js             聚合、检测并写入 KV
 scripts/probe-ips.js             本机探测候选 IP 延迟/COLO/带宽并回传
-scripts/lib/candidates.js        候选源解析
-scripts/lib/check.js             TCP/HTTP Edge 检测
+scripts/lib/candidates.js        候选源解析（并行抓取、CSV 表头解析）
+scripts/lib/check.js             TCP/HTTP Edge 检测（含抖动多采样）
+scripts/lib/speed.js             带宽测速（直连 IP 下载，供 GHA 抽测复用）
 docs/cloudflare-setup.md         Cloudflare 设置说明
 docs/deploy-checklist.md         部署前检查清单
 docs/d1-setup.md                 D1 测速数据存储与趋势面板绑定说明
@@ -191,6 +200,7 @@ sources/edge/remote.json         远程 CF Edge 候选源
 ```text
 TEMPLATE   原始 VLESS 模板，由网页保存
 BEST_IPS   最新优选 Edge IP 列表
+BEST_IPS_V6      IPv6 候选独立池（未实测标记，仅 ?ip6=1 时返回）
 BEST_IPS_LAST      最近一次写入的优选结果
 BEST_IPS_LATEST_VERSION 最近版本 key
 BEST_IPS_VERSION_INDEX  最近版本索引，默认只保留 30 个 BEST_IPS_* 快照
@@ -249,6 +259,13 @@ SOURCE_MAX_BYTES=5242880  远程候选源最大读取字节数，默认 5MB
 REQUIRE_CF_RAY=1          只保留带 cf-ray 的 Cloudflare Edge 验证结果，默认开启
 ALLOW_TCP_ONLY=1          兼容 TCP 可达但无 cf-ray 的结果，默认关闭
 VERSION_RETENTION=30      BEST_IPS_* 版本快照保留数量，默认 30
+SUB_SCORE_W_SPEED=1.0     评分公式带宽权重
+SUB_SCORE_W_COLO=0.5      评分公式落点加成权重（用户实测出 colo 的节点加分）
+SUB_SCORE_W_RTT=2.0       评分公式延迟惩罚权重
+SUB_SCORE_W_JITTER=1.0    评分公式抖动惩罚权重
+SUB_RTT_DROP_MS=1000      rtt 超过该值直接淘汰（毫秒），默认 1000
+SUB_PREFERRED_PORTS=      覆盖端口优先级顺序，如 "443,8443,2053"；留空保持 443 优先
+SUB_TOKEN_ROTATE_DAYS=    只读 token 自动周期轮换天数，如 7；留空则关闭（默认关闭）
 ```
 
 订阅接口 `/sub`、`/best` 和 `/versions` 默认需要只读 token；管理接口 `/api/template` 需要 `SUB_TOKEN`。管理接口默认只接受 `Authorization: Bearer <SUB_TOKEN>`，不要把管理 token 拼进 URL。首页上线后会通过 `/api/read-token`（需管理 token）换取 Cloudflare Pages 环境变量 `SUB_READ_TOKEN`，并只把这个只读 token 自动拼进订阅链接。
@@ -455,7 +472,10 @@ wrap=76     v2rayNG/base64 输出按固定宽度换行，兼容老客户端/复�
 colo=HKG    只保留该线路节点，逗号分隔多个；auto = 你的接入点；无匹配回退全量
 rank=off    关闭按本地实测数据重排（默认开启）
 mode=sample 抽样模式：不发固定榜，从过审池里按落点分桶后加权随机抽（见下）
+ip6=1       在常规节点之后追加 IPv6 独立池节点（带 [IPv6] 前缀，不占 n 名额）
 ```
+
+`type` 缺省时按请求 UA 自动识别：Clash/Mihomo/ClashMeta → clash，Sing-box → singbox，Surge → clash，Shadowrocket → shadowrocket，v2rayNG → v2rayng；识别不出回退 vless。显式 `?type=` 始终优先。响应带 `Subscription-Userinfo` 头，客户端订阅页可正常显示。
 
 抽样模式（`mode=sample`）与默认发榜的区别：KV 里存的是检查过审的整个 IP 池（按地址聚合，含各 IP 通过的端口列表）。带 `mode=sample` 拉订阅时，每次请求从池里随机抽 `n` 个发，本地实测只提高被抽中的权重、不再决定名次；节点端口优先 443；节点名不再印 GitHub 机房测出的延迟（有本地实测才标 `实测`）；Clash / Sing-box 输出会附带自动测速分组，客户端连接时自己挑活的。去掉这个参数即回退旧的固定榜订阅，便于 A/B 和回滚。
 
@@ -492,6 +512,8 @@ GET /api/read-token
 ```
 
 需要管理 token（`Authorization: Bearer <SUB_TOKEN>`）才会返回只读 token 的值；匿名请求只返回 `{ configured }`，不会泄露 `SUB_READ_TOKEN`。用于首页换取只读 token 后自动生成可直接导入客户端的订阅 URL。换取到的只读 token 只存在浏览器 localStorage，不会返回管理 token `SUB_TOKEN`。
+
+开启 `SUB_TOKEN_ROTATE_DAYS` 后，下发的是按周期派生的 token（HMAC-SHA256(只读token, 周期)，当期有效），泄露的订阅链接最多存活一个周期；静态只读 token 降级为派生密钥，不再直接接受为凭证。
 
 ### 测速反馈
 
@@ -716,6 +738,13 @@ npm run preflight
 - 抽样模式的自动测速分组（Clash url-test / Sing-box urltest+selector）
 - edgetunnel 探测旁路（抽样 30、443 优先、名称去延迟）
 - IP 实测回传（含 `ok:false`）与不可用 IP 剔除
+- 候选源并行抓取与单源超时隔离、CSV 表头解析（含回退）
+- 抖动多采样、加权评分公式、rtt 淘汰门槛、权重环境变量覆盖
+- Subscription-Userinfo 响应头、UA 自动识别客户端格式
+- 端口优先级环境变量覆盖（SUB_PREFERRED_PORTS）
+- IPv6 独立池与 ?ip6=1 通道
+- 只读 token 周期轮换（派生 token 确定性、跨周期、开关行为）
+- GHA Top 30 带宽抽测（mock 注入，不打真实网络）
 - 候选扫描状态码校验（1034 不入选）
 - 部署前检查
 
@@ -770,9 +799,11 @@ GitHub Secret 虽然不是公开文本，但没有必要让 GitHub Actions 持�
 
 确认你填的是 `sub://你的订阅生成器域名`，不要把 `?t=...` 直接拼在 `sub://` 后面。cmliu 版 edgetunnel 会忽略 `sub://` 后面的 query，并自己发起探测请求；本项目已专门兼容它的探测请求，但普通订阅请求仍然需要只读 token。
 
-### 为什么优选 IP 选出来全是美国/带宽显示 None？
+### 为什么优选 IP 选出来全是美国？
 
-测速在 GitHub Actions（美国）跑，候选来自 CF 官方 IP 段和社区源，Anycast 导致从美国探测到的多是美国节点；GitHub Actions 无法对 CF 边缘 IP 做带宽下载测速（speed.cloudflare.com 在 GHA 环境测速结果不代表国内），所以 averageSpeed 显示 None。要反映国内真实速度，请用首页「开始测速」按钮在本地浏览器测，结果会回传到 /api/speedtest-feedback。
+测速在 GitHub Actions（美国）跑，候选来自 CF 官方 IP 段和社区源，Anycast 导致从美国探测到的多是美国节点。这是扫描机视角，不代表你连过去的落点——跑一次 `node scripts/probe-ips.js` 回传实测，你的订阅就会按你的真实线路重排。
+
+带宽数据现在每 6 小时对 Top 30 过审节点主动抽测（直连 IP 下载 1MB），`averageSpeed` 不再是 None；更贴近你线路的数值请用首页「开始测速」或本地探测脚本。
 
 ### 为什么 IP 在 cleanip.io / AbuseIPDB 上显示 abuse？X/TikTok 等验证过不了？
 
@@ -786,7 +817,7 @@ GitHub Secret 虽然不是公开文本，但没有必要让 GitHub Actions 持�
 
 ### 为什么 IPv6 节点可能测不到 / 进不了 BEST_IPS？
 
-GitHub Actions 的运行机和很多 VPS 默认没有 IPv6 出口，无法连通 CF IPv6 边缘 IP，所以测速阶段 IPv6 候选会全部失败、进不了 `BEST_IPS`。这是测速环境限制，不是项目不支持 IPv6——`parseText`/`expandIPv6Cidr`/`checkEdge`/VLESS 生成都已完整支持 IPv6。如果你的测速环境有 IPv6 出口，IPv6 候选会正常参与优选。
+GitHub Actions 的运行机默认没有 IPv6 出口，无法连通 CF IPv6 边缘 IP，所以 IPv6 候选不会进主池 `BEST_IPS`。但它们不再被一刀切丢弃：会收录进独立池 `BEST_IPS_V6`（标记未实测），`/sub?ip6=1` 可追加返回，节点名带 `[IPv6]` 前缀。如果你的使用环境有 IPv6 线路，加上这个参数即可；以后的 GHA 若有了 v6 出口，主池也会自然收录。
 
 ### COLO 不认识怎么办？
 
