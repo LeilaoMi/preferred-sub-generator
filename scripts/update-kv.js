@@ -55,7 +55,7 @@ function pickSpeed(item) {
 }
 
 // P2-10: 对入池 Top N 做带宽抽测；成功则记 measuredSpeed，失败不阻断（保留原有 speed）
-async function measureTopBandwidth(nodes, { servername, downloadSpeedImpl = downloadSpeed }) {
+async function measureTopBandwidth(nodes, { downloadSpeedImpl = downloadSpeed }) {
   const targets = nodes.slice(0, BANDWIDTH_TOP_N);
   let cursor = 0;
   async function worker() {
@@ -64,7 +64,6 @@ async function measureTopBandwidth(nodes, { servername, downloadSpeedImpl = down
       cursor += 1;
       try {
         const speed = await downloadSpeedImpl(node.address, node.port, {
-          servername,
           bytes: BANDWIDTH_BYTES,
           timeoutMs: BANDWIDTH_TIMEOUT_MS,
         });
@@ -222,7 +221,7 @@ export async function buildUpdatePayload({
   );
   const jitterByAddress = new Map(jitterSamples.map((item) => [item.address, item.jitter ?? null]));
   // P2-10: 带宽抽测（Top 30），结果写回 measuredSpeed；失败不阻断
-  await measureTopBandwidth(aggregated, { servername: checkParams.host, downloadSpeedImpl });
+  await measureTopBandwidth(aggregated, { downloadSpeedImpl });
   const nextBestIps = aggregated.map((item, index) => ({
     address: item.address,
     port: item.port,

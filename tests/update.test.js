@@ -284,8 +284,8 @@ test("P2-10 build update payload writes measured bandwidth over CSV speed", asyn
     manualText: "1.1.1.1\n2.2.2.2",
     remoteSources: [],
     checkOne: async () => ({ latency: 10, colo: "LAX", edgeVerified: true }),
-    downloadSpeedImpl: async (address, port, { servername, bytes, timeoutMs }) => {
-      seen.push({ address, port, servername, bytes, timeoutMs });
+    downloadSpeedImpl: async (address, port, { bytes, timeoutMs }) => {
+      seen.push({ address, port, bytes, timeoutMs });
       return address === "1.1.1.1" ? 88.8 : null;
     },
     now: new Date("2026-06-03T00:00:00.000Z"),

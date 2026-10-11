@@ -306,7 +306,7 @@ async function main() {
     const bytes = Math.round(speedMb * 1000000);
     console.log(`2/2 测量下载带宽（每个 ${speedMb}MB，并发 2）…`);
     await pool(alive, 2, async (item) => {
-      item.speed = await downloadSpeed(item.address, item.port, { servername, bytes, timeoutMs: Math.max(timeoutMs, 15000) });
+      item.speed = await downloadSpeed(item.address, item.port, { bytes, timeoutMs: Math.max(timeoutMs, 15000) });
       return item;
     });
   } else {

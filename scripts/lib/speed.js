@@ -1,16 +1,23 @@
 import https from "node:https";
 
-// 直连 IP（SNI=servername）下载定速文件测带宽，返回 Mbps；失败返回 null。
+// 直连 IP（SNI/Host 固定为 speed.cloudflare.com）下载定速文件测带宽，返回 Mbps；失败返回 null。
 // 从 scripts/probe-ips.js 抽出，供 update-kv.js 的 GHA 带宽抽测复用。
-export function downloadSpeed(address, port, { servername, bytes, timeoutMs }) {
+//
+// 关键：必须用 speed.cloudflare.com 当 SNI/Host，连被测 IP 的端口。
+// /__down 是 CF 边缘的真实测速负载；若用节点自己的域名当 SNI/Host，
+// 请求会打到该域名的源站（如 edgetunnel 的 nginx 欢迎页），
+// 测出来的"带宽"只是源站小页面的下载抖动，完全失真。
+const SPEED_HOST = "speed.cloudflare.com";
+
+export function downloadSpeed(address, port, { bytes, timeoutMs }) {
   return new Promise((resolve) => {
     const request = https.request({
       host: address,
       port,
-      servername,
+      servername: SPEED_HOST,
       method: "GET",
       path: `/__down?bytes=${bytes}`,
-      headers: { Host: servername, "Accept-Encoding": "identity" },
+      headers: { Host: SPEED_HOST, "Accept-Encoding": "identity" },
       rejectUnauthorized: false,
       timeout: timeoutMs,
     }, (response) => {
