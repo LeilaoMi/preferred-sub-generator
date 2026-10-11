@@ -9,7 +9,7 @@ function readReq(token) {
 }
 
 const FIXED_NOW = Date.parse("2026-10-11T00:00:00.000Z");
-const rotateEnv = { SUB_READ_TOKEN: "base-secret", SUB_TOKEN_ROTATE_DAYS: "7", SUB_TOKEN: "admin-secret" };
+const rotateEnv = { SUB_READ_TOKEN: "base-secret", SUB_TOKEN_ROTATE_DAYS: "7", SUB_TOKEN: "admin-secret", SUB_PUBLIC: "0" };
 
 function req({ token = "", ip = "1.2.3.4" } = {}) {
   return new Request(token ? "https://example.com/api/template" : "https://example.com/api/template", {

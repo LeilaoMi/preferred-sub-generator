@@ -72,9 +72,12 @@ function subRequest(path) {
   });
 }
 
-test("sub requires read token by default", async () => {
-  const response = await handleSub(new Request("https://example.com/sub?type=vless&n=1"), createEnv());
+test("sub is public by default, requires token when SUB_PUBLIC=0", async () => {
+  const env = { ...createEnv(), SUB_PUBLIC: "0" };
+  const response = await handleSub(new Request("https://example.com/sub?type=vless&n=1"), env);
   assert.equal(response.status, 401);
+  const publicResp = await handleSub(new Request("https://example.com/sub?type=vless&n=1"), createEnv());
+  assert.notEqual(publicResp.status, 401);
 });
 
 test("sub allows public access only when SUB_PUBLIC=1", async () => {
@@ -209,6 +212,7 @@ test("edgetunnel probe caps sampled nodes at 30", async () => {
     VLESS_PORT: "443",
     VLESS_TYPE: "ws",
     VLESS_SECURITY: "tls",
+    SUB_PUBLIC: "0",
     SUB_KV: { async get(key) { return data.get(key) || null; }, put(key, value) { data.set(key, value); } },
   };
   const probe = new Request(
@@ -502,9 +506,12 @@ test("read-token API: reports unconfigured when SUB_READ_TOKEN missing", async (
   assert.deepEqual(parsed, { configured: false });
 });
 
-test("best requires read token by default", async () => {
-  const response = await handleBest(new Request("https://example.com/best?n=1"), createEnv());
+test("best is public by default, requires token when SUB_PUBLIC=0", async () => {
+  const env = { ...createEnv(), SUB_PUBLIC: "0" };
+  const response = await handleBest(new Request("https://example.com/best?n=1"), env);
   assert.equal(response.status, 401);
+  const publicResp = await handleBest(new Request("https://example.com/best?n=1"), createEnv());
+  assert.notEqual(publicResp.status, 401);
 });
 
 test("best limits nodes to 50", async () => {
@@ -520,9 +527,12 @@ test("best limits nodes to 50", async () => {
 
 
 
-test("versions requires read token by default", async () => {
-  const response = await handleVersions(new Request("https://example.com/versions"), createEnv());
+test("versions is public by default, requires token when SUB_PUBLIC=0", async () => {
+  const env = { ...createEnv(), SUB_PUBLIC: "0" };
+  const response = await handleVersions(new Request("https://example.com/versions"), env);
   assert.equal(response.status, 401);
+  const publicResp = await handleVersions(new Request("https://example.com/versions"), createEnv());
+  assert.notEqual(publicResp.status, 401);
 });
 
 test("versions returns bounded version index", async () => {
