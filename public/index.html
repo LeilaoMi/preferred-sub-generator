@@ -196,7 +196,7 @@
         </div>
 
         <details style="margin-top: 16px;">
-          <summary style="cursor: pointer; color: var(--muted); font-size: 14px;">只读 token 设置（首次使用需配置一次）</summary>
+          <summary style="cursor: pointer; color: var(--muted); font-size: 14px;">只读 token 设置（私用部署填一次；公开部署 SUB_PUBLIC=1 可跳过）</summary>
           <div style="margin-top: 12px;">
             <label for="readTokenInput">只读 token</label>
             <input id="readTokenInput" type="password" placeholder="粘贴只读 token" autocomplete="off">
@@ -361,10 +361,6 @@
       result.classList.add("visible");
       if (!nodeLink.startsWith("vless://")) {
         resultHint.innerHTML = "<span class='danger'>请先粘贴 vless:// 节点链接。</span>";
-        return;
-      }
-      if (!readToken) {
-        resultHint.innerHTML = "<span class='warn'>请先在下方「只读 token 设置」里填入 token（只需一次）。</span>";
         return;
       }
       try {
