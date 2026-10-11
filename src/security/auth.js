@@ -20,6 +20,50 @@ function getTokens(env) {
   return [env.SUB_TOKEN, env.SUB_TOKEN_NEXT].filter(Boolean);
 }
 
+// 管理 token 的 KV 持久化：KV 不受 Pages 重新部署影响，解决环境变量
+// 在 wrangler 部署后丢失导致回传鉴权失效的问题。KV 里只存 SHA-256 哈希，
+// 不存原文；环境变量仍保留为兼容路径。
+export const KV_ADMIN_TOKEN_KEY = "ADMIN_TOKEN_SHA256";
+
+export async function sha256Hex(text) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function kvAdminTokenHash(env) {
+  try {
+    const value = await env.SUB_KV.get(KV_ADMIN_TOKEN_KEY);
+    return typeof value === "string" && value.length === 64 ? value : "";
+  } catch {
+    return "";
+  }
+}
+
+export async function requireAuthAsync(request, env) {
+  const tokens = getTokens(env);
+  const kvHash = await kvAdminTokenHash(env);
+  if (tokens.length === 0 && !kvHash) {
+    return { authorized: false, reason: "Missing SUB_TOKEN" };
+  }
+
+  if (!isAllowedIp(request, env)) {
+    return { authorized: false, reason: "IP not allowed" };
+  }
+
+  const candidate = tokenFromRequest(request, "token", envFlag(env.ALLOW_QUERY_TOKEN));
+  if (!candidate) {
+    return { authorized: false, reason: "Unauthorized" };
+  }
+
+  if (tokens.some((token) => constantTimeEqual(candidate, token))) {
+    return { authorized: true };
+  }
+  if (kvHash && constantTimeEqual(await sha256Hex(candidate), kvHash)) {
+    return { authorized: true };
+  }
+  return { authorized: false, reason: "Unauthorized" };
+}
+
 function getReadTokens(env) {
   return [env.SUB_READ_TOKEN, env.SUB_READ_TOKEN_NEXT, env.SUB_TOKEN, env.SUB_TOKEN_NEXT].filter(Boolean);
 }

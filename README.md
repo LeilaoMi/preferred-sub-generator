@@ -231,13 +231,13 @@ Functions 目录：functions
 KV 绑定变量名：SUB_KV
 ```
 
-### 3. 设置 Pages 环境变量
+### 3. 设置管理 token（一次性）
 
-Cloudflare Pages 生产环境需要设置：
+部署完成后，在浏览器打开 `https://你的域名/setup.html`，按提示设置管理 token 即可。
 
-```text
-SUB_TOKEN   管理 token，用于管理接口鉴权
-```
+- 只存 SHA-256 哈希，不存原文；设置后即锁定，不可重复设置。
+- 存在 KV 中，重新部署不会丢失（Pages 环境变量在 wrangler 部署后可能被清空，不建议再用它存 token）。
+- 兼容旧路径：仍可通过 Pages 环境变量 `SUB_TOKEN` 设置，此时设置页自动锁定。
 
 节点配置（对标竞品离散配置，必填，项目内不再存模板）：
 

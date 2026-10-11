@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>设置管理 token · 优选订阅生成器</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #090b14;
+      --panel: rgba(10, 16, 30, 0.82);
+      --border: rgba(148, 163, 184, 0.2);
+      --text: #e5edf7;
+      --muted: #9aa8bc;
+      --accent: #38bdf8;
+      --accent-strong: #0ea5e9;
+      --ok: #34d399;
+      --danger: #fb7185;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+      line-height: 1.6;
+      background: linear-gradient(135deg, rgba(2, 6, 23, 0.1), rgba(2, 6, 23, 0.86)), var(--bg);
+    }
+    main {
+      width: min(560px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 48px 0;
+    }
+    .card {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: var(--panel);
+      padding: 28px 24px;
+    }
+    h1 { margin: 0 0 8px; font-size: 22px; }
+    p { color: var(--muted); margin: 8px 0; font-size: 14px; }
+    label { display: block; margin: 18px 0 6px; font-size: 14px; }
+    input {
+      width: 100%;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: rgba(2, 6, 23, 0.6);
+      color: var(--text);
+      font-size: 16px;
+    }
+    button {
+      width: 100%;
+      margin-top: 16px;
+      padding: 12px;
+      border: 0;
+      border-radius: 10px;
+      background: var(--accent-strong);
+      color: #fff;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.6; cursor: default; }
+    #msg { min-height: 24px; font-size: 14px; }
+    #msg.ok { color: var(--ok); }
+    #msg.err { color: var(--danger); }
+    a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="card">
+      <h1>设置管理 token</h1>
+      <p id="desc">一次性设置：用于探测回传与管理接口鉴权。服务端只保存哈希，不保存原文；设置后即锁定，不可重复设置。</p>
+      <div id="locked" hidden>
+        <p>管理 token 已设置，无需重复操作。</p>
+        <p><a href="/admin.html">前往管理页</a></p>
+      </div>
+      <form id="form" hidden>
+        <label for="token">管理 token（至少 12 位，自己定一个好记的）</label>
+        <input id="token" type="password" autocomplete="new-password" minlength="12" required>
+        <button type="submit" id="submit">保存</button>
+        <p id="msg"></p>
+      </form>
+    </div>
+  </main>
+  <script>
+    const form = document.getElementById("form");
+    const locked = document.getElementById("locked");
+    const desc = document.getElementById("desc");
+    const msg = document.getElementById("msg");
+    const submit = document.getElementById("submit");
+    const tokenInput = document.getElementById("token");
+
+    (async () => {
+      try {
+        const state = await (await fetch("/api/admin-setup", { cache: "no-store" })).json();
+        if (state.setupRequired) {
+          form.hidden = false;
+        } else {
+          locked.hidden = false;
+          desc.hidden = true;
+        }
+      } catch {
+        msg.textContent = "无法连接服务端，请稍后重试。";
+        msg.className = "err";
+        form.hidden = false;
+      }
+    })();
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const token = tokenInput.value.trim();
+      if (token.length < 12) {
+        msg.textContent = "管理 token 至少 12 位。";
+        msg.className = "err";
+        return;
+      }
+      submit.disabled = true;
+      msg.textContent = "保存中…";
+      msg.className = "";
+      try {
+        const response = await fetch("/api/admin-setup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (response.ok && data.ok) {
+          msg.textContent = "已保存。请用这个 token 运行探测脚本回传（--token 参数）。";
+          msg.className = "ok";
+          tokenInput.value = "";
+        } else {
+          msg.textContent = data.error || `保存失败（${response.status}）`;
+          msg.className = "err";
+        }
+      } catch {
+        msg.textContent = "网络错误，请重试。";
+        msg.className = "err";
+      } finally {
+        submit.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

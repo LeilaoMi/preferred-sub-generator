@@ -1,4 +1,4 @@
-import { requireAuth } from "../security/auth.js";
+import { requireAuthAsync } from "../security/auth.js";
 import { checkRateLimit } from "../security/rate-limit.js";
 import { jsonResponse } from "../utils/response.js";
 import { getNodeConfig, validateNodeConfig } from "../config/nodes.js";
@@ -20,17 +20,17 @@ function toTemplateSafe(config) {
   };
 }
 
-function denyUnauthorized(request, env) {
+async function denyUnauthorized(request, env) {
   const rate = checkRateLimit(request);
   if (!rate.allowed) return jsonResponse({ error: rate.error }, rate.status);
 
-  const auth = requireAuth(request, env);
+  const auth = await requireAuthAsync(request, env);
   if (auth.authorized) return null;
   return jsonResponse({ error: auth.reason }, auth.reason === "Missing SUB_TOKEN" ? 500 : 401);
 }
 
 export async function handleTemplateGet(request, env) {
-  const denied = denyUnauthorized(request, env);
+  const denied = await denyUnauthorized(request, env);
   if (denied) return denied;
 
   let config;
@@ -47,7 +47,7 @@ export async function handleTemplateGet(request, env) {
 }
 
 export async function handleTemplatePost(request, env) {
-  const denied = denyUnauthorized(request, env);
+  const denied = await denyUnauthorized(request, env);
   if (denied) return denied;
 
   return jsonResponse(

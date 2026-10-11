@@ -1,4 +1,4 @@
-import { requireAuth } from "../security/auth.js";
+import { requireAuthAsync } from "../security/auth.js";
 import { checkRateLimit } from "../security/rate-limit.js";
 import { jsonResponse } from "../utils/response.js";
 import { ensureD1Schema, hashClientIp } from "./speedtest-db.js";
@@ -231,7 +231,7 @@ function authFailure(auth) {
 }
 
 export async function handleIpFeedbackPost(request, env) {
-  const auth = requireAuth(request, env);
+  const auth = await requireAuthAsync(request, env);
   if (!auth.authorized) return authFailure(auth);
 
   const rate = checkRateLimit(request);
@@ -262,7 +262,7 @@ export async function handleIpFeedbackPost(request, env) {
 }
 
 export async function handleIpFeedbackGet(request, env) {
-  const auth = requireAuth(request, env);
+  const auth = await requireAuthAsync(request, env);
   if (!auth.authorized) return authFailure(auth);
 
   const url = new URL(request.url);

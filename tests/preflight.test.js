@@ -40,7 +40,14 @@ test("preflight requires workflow hardening controls", () => {
 });
 
 test("preflight checks homepage safety", () => {
-  const html = '<html lang="zh-CN"><script>fetch("/status"); fetch("/api/read-token"); fetch("/api/template", { headers: { Authorization: `Bearer token` } });</script></html>';
+  // 默认公开模式：首页零门槛，不要求管理 token / read-token
+  const html = '<html lang="zh-CN"><script>fetch("/status");</script></html>';
 
   assert.deepEqual(checkHomepage(html), []);
+});
+
+test("preflight rejects hardcoded tokens on homepage", () => {
+  const html = '<html lang="zh-CN"><script>fetch("/status"); const t = "secret-token";</script></html>';
+
+  assert.match(checkHomepage(html).join("\n"), /测试 token/);
 });

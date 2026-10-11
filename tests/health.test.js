@@ -60,8 +60,11 @@ test("health full requires admin auth and returns details", async () => {
   assert.equal(parsed.bestIpsCount, 1);
 });
 
-test("health fails without node config", async () => {
+test("health ok without node config (VLESS_* 已改为可选)", async () => {
+  // 架构变更：VLESS_* 不再是必填（首页用户粘贴节点 / edgetunnel 占位模板），
+  // 健康只看 IP 池是否有可用数据
   const env = createEnv({ BEST_IPS: JSON.stringify([{ address: "1.1.1.1" }]) }, { VLESS_UUID: "" });
   const response = await handleHealth(new Request("https://example.com/health"), env);
-  assert.equal(response.status, 503);
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { ok: true });
 });

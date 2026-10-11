@@ -1,4 +1,4 @@
-import { deriveReadToken, requireAuth } from "../security/auth.js";
+import { deriveReadToken, requireAuthAsync } from "../security/auth.js";
 import { jsonResponse } from "../utils/response.js";
 
 export async function handleReadToken(request, env) {
@@ -9,7 +9,7 @@ export async function handleReadToken(request, env) {
     return jsonResponse({ configured: false });
   }
 
-  const auth = requireAuth(request, env);
+  const auth = await requireAuthAsync(request, env);
   if (!auth.authorized) {
     return jsonResponse({ configured: true });
   }

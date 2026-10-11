@@ -1,4 +1,4 @@
-import { requireAuth } from "../security/auth.js";
+import { requireAuthAsync } from "../security/auth.js";
 import { checkRateLimit } from "../security/rate-limit.js";
 import { jsonResponse } from "../utils/response.js";
 import { hashClientIp, insertFeedback, loadFeedback, summarizeFeedback } from "./speedtest-db.js";
@@ -47,7 +47,7 @@ export async function handleSpeedtestFeedbackPost(request, env) {
 }
 
 export async function handleSpeedtestFeedbackGet(request, env) {
-  const auth = requireAuth(request, env);
+  const auth = await requireAuthAsync(request, env);
   if (!auth.authorized) return jsonResponse({ error: auth.reason }, auth.reason === "Missing SUB_TOKEN" ? 500 : 401);
 
   const url = new URL(request.url);

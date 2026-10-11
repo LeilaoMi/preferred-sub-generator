@@ -51,10 +51,9 @@ export function checkHomepage(content) {
   const issues = [];
   if (!content.includes('lang="zh-CN"')) issues.push("首页未设置 lang=zh-CN");
   if (!content.includes("/status")) issues.push("首页未读取 /status");
-  if (!content.includes("Authorization")) issues.push("首页保存模板时未发送管理 token");
   if (content.includes("secret-token")) issues.push("首页包含测试 token");
   if (content.includes("autosub")) issues.push("首页包含写死只读 token");
-  if (!content.includes("/api/read-token")) issues.push("首页未从 /api/read-token 读取线上 SUB_READ_TOKEN");
+  // 默认公开模式：首页零门槛（打开→粘贴 VLESS→生成→复制），不再要求管理 token / read-token
   return issues;
 }
 

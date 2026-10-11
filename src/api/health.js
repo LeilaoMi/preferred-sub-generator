@@ -1,4 +1,4 @@
-import { requireAuth } from "../security/auth.js";
+import { requireAuthAsync } from "../security/auth.js";
 import { jsonResponse, unauthorizedResponse } from "../utils/response.js";
 import { getNodeConfig, validateNodeConfig } from "../config/nodes.js";
 
@@ -22,7 +22,9 @@ async function readHealthDetails(env) {
     bestIpsCount = 0;
   }
 
-  const ok = configOk && bestIpsCount > 0;
+  // VLESS_* 已改为可选（首页用户粘贴节点 / edgetunnel 占位模板），健康只看 IP 池
+  // 是否有可用数据；configOk/configWarnings 保留为 /full 的参考信息
+  const ok = bestIpsCount > 0;
   return { ok, kv: true, configOk, configWarnings, bestIpsCount };
 }
 
@@ -31,7 +33,7 @@ export async function handleHealth(request, env) {
   const details = await readHealthDetails(env);
 
   if (url.pathname.endsWith("/full")) {
-    const auth = requireAuth(request, env);
+    const auth = await requireAuthAsync(request, env);
     if (!auth.authorized) return unauthorizedResponse();
     return jsonResponse(details, details.ok ? 200 : 503);
   }
