@@ -66,25 +66,83 @@
     .status { margin-top: 16px; padding: 12px 14px; border-radius: 14px; background: rgba(56, 189, 248, 0.12); color: var(--accent); }
     .status.bad { background: rgba(251, 113, 133, 0.12); color: var(--bad); }
     .status.good { background: rgba(52, 211, 153, 0.12); color: var(--good); }
+    .fieldgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0 16px; }
+    select {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: rgba(2, 6, 23, 0.68);
+      color: var(--text);
+      padding: 14px;
+      font: inherit;
+    }
+    details { margin-top: 18px; border: 1px solid var(--border); border-radius: 14px; padding: 12px 14px; }
+    summary { cursor: pointer; font-weight: 700; color: var(--muted); }
+    .warnbox { margin-top: 16px; padding: 12px 14px; border-radius: 14px; background: rgba(251, 191, 36, 0.12); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.35); }
+    .warnbox div { margin: 4px 0; }
+    .hint { font-size: 13px; color: var(--muted); margin-top: 6px; }
   </style>
 </head>
 <body>
   <main>
     <section class="card">
       <h1>订阅配置</h1>
-      <p>这里用于更换你的原始 VLESS 模板。保存后，现有优选 IP 会继续复用新的 UUID、Host、SNI、路径和 TLS 设置。</p>
+      <p>模板决定所有生成节点的 UUID、SNI、Host、路径与 TLS 设置。请分项填写，保存时会自动校验风险项（如在中国大陆被 SNI 阻断的域名）。不再支持"粘一条链接就静默照抄"。</p>
 
       <label for="token">管理 token</label>
       <input id="token" type="password" placeholder="粘贴你的管理 token" autocomplete="off" />
 
-      <label for="template">原始 VLESS 链接</label>
-      <textarea id="template" placeholder="vless://..."></textarea>
+      <div class="fieldgrid">
+        <div>
+          <label for="f_uuid">UUID</label>
+          <input id="f_uuid" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" autocomplete="off" />
+        </div>
+        <div>
+          <label for="f_sni">SNI（TLS 握手域名）</label>
+          <input id="f_sni" placeholder="如：v.example.com" autocomplete="off" />
+          <div class="hint">GFW 按 SNI 阻断，workers.dev / pages.dev 在此高危</div>
+        </div>
+        <div>
+          <label for="f_host">Host（HTTP 域名，决定路由到哪个后端）</label>
+          <input id="f_host" placeholder="如：xxx.workers.dev" autocomplete="off" />
+        </div>
+        <div>
+          <label for="f_path">路径 Path</label>
+          <input id="f_path" placeholder="/ 或 /?ed=2048" autocomplete="off" />
+        </div>
+        <div>
+          <label for="f_port">端口</label>
+          <input id="f_port" type="number" min="1" max="65535" value="443" />
+        </div>
+        <div>
+          <label for="f_type">传输类型</label>
+          <select id="f_type">
+            <option value="ws">ws</option>
+            <option value="tcp">tcp</option>
+            <option value="grpc">grpc</option>
+          </select>
+        </div>
+        <div>
+          <label for="f_security">TLS</label>
+          <select id="f_security">
+            <option value="tls">tls</option>
+            <option value="none">none</option>
+          </select>
+        </div>
+      </div>
+
+      <details>
+        <summary>从 VLESS 链接导入（仅填充上方字段，仍需检查后保存）</summary>
+        <label for="templateImport">VLESS 链接</label>
+        <textarea id="templateImport" placeholder="vless://..."></textarea>
+        <button id="importBtn" class="secondary">解析并填入字段</button>
+      </details>
 
       <button id="load">读取当前模板</button>
-      <button id="preview" class="secondary">解析预览</button>
       <button id="save">保存模板</button>
 
       <div id="message" class="status">请先填写管理 token，或用 /admin.html#token=你的token 打开。</div>
+      <div id="warnBox"></div>
       <div id="previewBox" class="grid"></div>
     </section>
 
@@ -106,9 +164,11 @@
 
   <script>
     const tokenInput = document.getElementById("token");
-    const templateInput = document.getElementById("template");
     const message = document.getElementById("message");
     const previewBox = document.getElementById("previewBox");
+    const warnBox = document.getElementById("warnBox");
+    const fieldIds = ["uuid", "sni", "host", "path", "port", "type", "security"];
+    const fieldEls = Object.fromEntries(fieldIds.map((k) => [k, document.getElementById("f_" + k)]));
     const tokenFromUrl = location.hash.replace(/^#token=/, "").trim();
     if (tokenFromUrl) {
       tokenInput.value = tokenFromUrl;
@@ -131,13 +191,44 @@
     }
 
     function renderPreview(preview) {
-      const fields = ["uuid", "address", "port", "security", "type", "host", "sni", "path", "name"];
+      const fields = ["uuid", "port", "security", "type", "host", "sni", "path"];
       previewBox.innerHTML = fields.map((key) => `
         <div class="item">
           <div class="key">${escapeHtml(key)}</div>
           <div class="value">${escapeHtml(preview[key] || "-")}</div>
         </div>
       `).join("");
+    }
+
+    function renderWarnings(warnings) {
+      const list = Array.isArray(warnings) ? warnings : [];
+      if (list.length === 0) { warnBox.innerHTML = ""; return; }
+      warnBox.innerHTML = `<div class="warnbox">` + list.map((w) => `
+        <div>⚠️ [${escapeHtml(w.field)}] ${escapeHtml(w.message)}</div>
+      `).join("") + `</div>`;
+    }
+
+    function collectFields() {
+      return {
+        uuid: fieldEls.uuid.value.trim(),
+        sni: fieldEls.sni.value.trim(),
+        host: fieldEls.host.value.trim(),
+        path: fieldEls.path.value.trim(),
+        port: Number(fieldEls.port.value) || 443,
+        type: fieldEls.type.value,
+        security: fieldEls.security.value,
+      };
+    }
+
+    function fillFields(f) {
+      if (!f) return;
+      fieldEls.uuid.value = f.uuid || "";
+      fieldEls.sni.value = f.sni || "";
+      fieldEls.host.value = f.host || "";
+      fieldEls.path.value = f.path || "";
+      fieldEls.port.value = f.port || 443;
+      fieldEls.type.value = f.type || "ws";
+      fieldEls.security.value = f.security || "tls";
     }
 
     async function requestTemplate(method, body) {
@@ -153,47 +244,58 @@
         body: body ? JSON.stringify(body) : undefined,
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "请求失败");
+      if (!response.ok) {
+        renderWarnings(data.warnings);
+        throw new Error(data.error || "请求失败");
+      }
       return data;
     }
 
     document.getElementById("load").onclick = async () => {
       try {
+        renderWarnings([]);
         const data = await requestTemplate("GET");
-        renderPreview(data.preview);
-        setMessage("已读取当前模板安全预览。为避免泄露，系统不会回显完整原始 VLESS。", "good");
+        fillFields(data.fields);
+        renderPreview(data.preview || {});
+        renderWarnings(data.warnings);
+        setMessage("已读取当前模板并填入各字段，检查后可修改保存。", "good");
       } catch (error) {
         setMessage(error.message, "bad");
       }
     };
 
-    document.getElementById("preview").onclick = () => {
+    document.getElementById("importBtn").onclick = () => {
       try {
-        const url = new URL(templateInput.value.trim());
+        const raw = document.getElementById("templateImport").value.trim();
+        const url = new URL(raw);
         if (url.protocol !== "vless:") throw new Error("必须是 vless:// 链接");
         const params = Object.fromEntries(url.searchParams.entries());
-        renderPreview({
+        fillFields({
           uuid: decodeURIComponent(url.username),
-          address: url.hostname,
-          port: url.port || "-",
-          security: params.security || "none",
-          type: params.type || "tcp",
-          host: params.host || "-",
-          sni: params.sni || params.peer || "-",
-          path: params.path ? decodeURIComponent(params.path) : "-",
-          name: url.hash ? decodeURIComponent(url.hash.slice(1)) : "-",
+          sni: params.sni || params.peer || "",
+          host: params.host || "",
+          path: params.path ? decodeURIComponent(params.path) : "",
+          port: url.port ? Number(url.port) : 443,
+          type: params.type || "ws",
+          security: params.security || "tls",
         });
-        setMessage("解析成功，确认无误后可保存。", "good");
+        setMessage("已从链接解析并填入字段，请逐项检查（尤其 SNI）后再保存。", "good");
       } catch (error) {
-        setMessage(error.message, "bad");
+        setMessage("导入失败：" + error.message, "bad");
       }
     };
 
     document.getElementById("save").onclick = async () => {
       try {
-        const data = await requestTemplate("POST", { template: templateInput.value.trim() });
-        renderPreview(data.preview);
-        setMessage("保存成功。订阅接口会立即使用新模板。", "good");
+        renderWarnings([]);
+        const data = await requestTemplate("POST", { fields: collectFields() });
+        renderPreview(data.preview || {});
+        renderWarnings(data.warnings);
+        const hasWarn = (data.warnings || []).length > 0;
+        setMessage(
+          hasWarn ? "保存成功，但存在风险提示，请务必查看上方黄色警告。" : "保存成功。订阅接口会立即使用新模板。",
+          hasWarn ? "" : "good",
+        );
       } catch (error) {
         setMessage(error.message, "bad");
       }

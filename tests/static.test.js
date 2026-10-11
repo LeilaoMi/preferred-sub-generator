@@ -48,8 +48,11 @@ test("admin page is Chinese and uses admin token for api/template", async () => 
   assert.match(html, /管理 token/);
   assert.match(html, /api\/template/);
   assert.match(html, /Authorization/);
-  assert.match(html, /解析预览/);
+  assert.match(html, /从 VLESS 链接导入/);
   assert.match(html, /保存模板/);
+  assert.match(html, /f_sni/);
+  assert.match(html, /f_uuid/);
+  assert.match(html, /warnBox/);
   assert.match(html, /function escapeHtml/);
   assert.match(html, /escapeHtml\(preview\[key\] \|\| "-"\)/);
   assert.doesNotMatch(html, /secret-token/);

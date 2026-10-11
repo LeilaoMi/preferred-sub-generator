@@ -401,8 +401,79 @@ test("template API: POST saves new vless and returns parsed", async () => {
   assert.equal(response.status, 200);
   assert.equal(parsed.saved, true);
   assert.equal(parsed.preview.uuid, "22222222-2222-4222-8222-222222222222");
-  assert.match(saved, /^vless:\/\//);
-  assert.match(saved, /new\.example/);
+  // 新逻辑：统一存规范 JSON，不再原样存 URI 字符串
+  const stored = JSON.parse(saved);
+  assert.equal(stored.uuid, "22222222-2222-4222-8222-222222222222");
+  assert.equal(stored.sni, "new.example");
+  assert.equal(parsed.warnings.length, 0);
+});
+
+test("template API: POST fields format saves canonical JSON", async () => {
+  const env = createEnv();
+  const response = await handleTemplatePost(
+    new Request("https://example.com/template", {
+      method: "POST",
+      headers: { Authorization: "Bearer secret-token" },
+      body: JSON.stringify({
+        fields: {
+          uuid: "33333333-3333-4333-8333-333333333333",
+          sni: "front.example.com",
+          host: "backend.example.net",
+          path: "/ws",
+          port: 443,
+          security: "tls",
+          type: "ws",
+        },
+      }),
+    }),
+    env,
+  );
+  const parsed = await response.json();
+  const stored = JSON.parse(await env.SUB_KV.get("TEMPLATE"));
+
+  assert.equal(response.status, 200);
+  assert.equal(parsed.saved, true);
+  assert.equal(stored.sni, "front.example.com");
+  assert.equal(stored.host, "backend.example.net");
+  assert.equal(stored.protocol, "vless");
+});
+
+test("template API: POST rejects missing uuid", async () => {
+  const env = createEnv();
+  const response = await handleTemplatePost(
+    new Request("https://example.com/template", {
+      method: "POST",
+      headers: { Authorization: "Bearer secret-token" },
+      body: JSON.stringify({ fields: { sni: "a.com", host: "b.com" } }),
+    }),
+    env,
+  );
+  assert.equal(response.status, 400);
+  const parsed = await response.json();
+  assert.match(parsed.error, /UUID/);
+});
+
+test("template API: POST warns on workers.dev SNI but still saves", async () => {
+  const env = createEnv();
+  const response = await handleTemplatePost(
+    new Request("https://example.com/template", {
+      method: "POST",
+      headers: { Authorization: "Bearer secret-token" },
+      body: JSON.stringify({
+        fields: {
+          uuid: "44444444-4444-4444-8444-444444444444",
+          sni: "xxx.workers.dev",
+          host: "xxx.workers.dev",
+          path: "/",
+        },
+      }),
+    }),
+    env,
+  );
+  const parsed = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(parsed.saved, true);
+  assert.ok(parsed.warnings.some((w) => w.field === "sni" && w.level === "warn"));
 });
 
 test("read-token API: anonymous request only learns configured flag, never the token", async () => {

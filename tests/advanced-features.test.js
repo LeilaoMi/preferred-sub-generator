@@ -53,7 +53,9 @@ test("template POST can save selected slot and audit selected key", async () => 
 
   assert.equal(response.status, 200);
   assert.equal(parsed.key, "TEMPLATE_3");
-  assert.equal(await env.SUB_KV.get("TEMPLATE_3"), template2);
+  const stored3 = JSON.parse(await env.SUB_KV.get("TEMPLATE_3"));
+  assert.equal(stored3.uuid, "22222222-2222-4222-8222-222222222222");
+  assert.equal(stored3.sni, "example.com");
   assert.equal(audit.lastTemplateKey, "TEMPLATE_3");
   assert.equal(audit.lastTemplateUpdateIp, "8.8.8.8");
 });
