@@ -2,70 +2,36 @@ import fs from "node:fs/promises";
 import test from "node:test";
 import assert from "node:assert/strict";
 
-test("homepage is Chinese, builds protected subscription URLs, and uses admin token only for template save", async () => {
+test("homepage is Chinese, paste-link-to-generate (no template)", async () => {
   const html = await fs.readFile(new URL("../public/index.html", import.meta.url), "utf8");
 
   assert.match(html, /<html lang="zh-CN">/);
   assert.match(html, /优选订阅生成器/);
   assert.match(html, /节点链接/);
-  assert.match(html, /管理 token/);
-  assert.match(html, /默认格式/);
-  assert.match(html, /\/status/);
-  assert.match(html, /\/sub\?type=v2rayng/);
-  assert.match(html, /默认需要只读 token/);
-  assert.match(html, /location\.origin/);
-  assert.match(html, /let readToken = ""/);
-  assert.match(html, /fetch\("\/api\/read-token", \{ headers \}\)/);
-  assert.match(html, /SUB_READ_TOKEN/);
-  assert.match(html, /searchParams\.set\("t", readToken\)/);
-  assert.match(html, /只读 token（由管理 token 换取）/);
-  assert.match(html, /不会带管理 token/);
-  assert.match(html, /localStorage\.setItem\(READ_TOKEN_STORAGE_KEY/);
-  assert.match(html, /Authorization = `Bearer \$\{adminToken\}`/);
-  assert.doesNotMatch(html, /fetch\("\/api\/read-token"\)/);
-  assert.doesNotMatch(html, /autosub/);
-  assert.match(html, /api\/template/);
-  assert.match(html, /Authorization/);
-  assert.match(html, /已保存节点模板/);
-  assert.equal((html.match(/id="adminToken"/g) || []).length, 1);
-  assert.equal((html.match(/id="subscriptionList"/g) || []).length, 1);
-  assert.doesNotMatch(html, /\/sub\?type=v2rayng&token=/);
-  assert.doesNotMatch(html, /searchParams\.get\("token"\)/);
-  assert.match(html, /history\.replaceState/);
+  assert.match(html, /生成优选订阅/);
+  assert.match(html, /parseVlessLink/);
+  assert.match(html, /buildSubscriptionUrl/);
+  assert.match(html, /只读 token 设置/);
+  assert.match(html, /项目本身不保存任何模板/);
   assert.match(html, /function escapeHtml/);
-  assert.match(html, /escapeHtml\(error\.message\)/);
-  assert.match(html, /escapeHtml\(value \|\| "-"\)/);
   assert.match(html, /复制/);
   assert.doesNotMatch(html, /secret-token/);
-  assert.match(html, /保存并生成/);
-  assert.match(html, /仅显示订阅/);
+  assert.doesNotMatch(html, /保存模板/);
+  assert.doesNotMatch(html, /id="adminToken"/);
+  assert.doesNotMatch(html, /id="coloFilter"/);
 });
 
-test("admin page is Chinese and uses admin token for api/template", async () => {
+test("admin page is Chinese, read-only node config", async () => {
   const html = await fs.readFile(new URL("../public/admin.html", import.meta.url), "utf8");
 
   assert.match(html, /节点配置/);
-  assert.match(html, /管理 token/);
-  assert.match(html, /api\/template/);
-  assert.match(html, /Authorization/);
   assert.match(html, /环境变量/);
   assert.match(html, /VLESS_UUID/);
+  assert.match(html, /读取当前配置/);
   assert.match(html, /warnBox/);
   assert.match(html, /function escapeHtml/);
   assert.doesNotMatch(html, /secret-token/);
   assert.doesNotMatch(html, /保存模板/);
-});
-
-test("homepage exposes colo filter input and local edge rtt metrics", async () => {
-  const html = await fs.readFile(new URL("../public/index.html", import.meta.url), "utf8");
-
-  assert.match(html, /id="coloFilter"/);
-  assert.match(html, /searchParams\.set\("colo", colo\)/);
-  assert.match(html, /coloInput\.addEventListener\("input", renderSubscriptions\)/);
-  assert.match(html, /id="userColo"/);
-  assert.match(html, /id="userRtt"/);
-  assert.match(html, /cdn-cgi\/trace\?cb=/);
-  assert.match(html, /Math\.min\(\.\.\.samples\)/);
 });
 
 test("wrangler config declares Pages output and SUB_KV binding", async () => {

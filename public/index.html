@@ -176,49 +176,34 @@
   <main>
     <section class="hero">
       <div class="generator">
-        <div class="badge">⚡ 单用户私用版 · 粘贴节点即可生成</div>
+        <div class="badge">⚡ 粘贴节点即可生成</div>
         <h1>优选订阅生成器</h1>
-        <p>粘贴你的 VLESS 节点链接，选择客户端格式，一键生成可复制的优选订阅地址。</p>
+        <p>粘贴你的 VLESS 节点链接，一键生成可复制的优选订阅地址。节点信息只存在你生成的订阅链接里，项目本身不保存任何模板。</p>
 
         <label for="nodeLink">节点链接</label>
-        <textarea id="nodeLink" placeholder="粘贴 vless:// 节点链接，或粘贴原始订阅中的单条节点"></textarea>
-
-        <div class="form-grid">
-          <div>
-            <label for="adminToken">管理 token</label>
-            <input id="adminToken" type="password" placeholder="仅用于保存模板，不会放进订阅链接" autocomplete="off">
-          </div>
-          <div>
-            <label for="format">默认格式</label>
-            <select id="format">
-              <option value="v2rayng">v2rayNG</option>
-              <option value="clash">Clash</option>
-              <option value="singbox">Sing-box</option>
-              <option value="shadowrocket">Shadowrocket</option>
-              <option value="vless">VLESS</option>
-            </select>
-          </div>
-        </div>
-
-        <div style="margin-top: 12px;">
-          <label for="coloFilter">线路过滤（COLO）</label>
-          <input id="coloFilter" type="text" placeholder="留空不过滤；auto = 你的接入点，或 HKG,NRT,LAX">
-          <p class="hint">填写后订阅只保留该线路节点；无匹配时自动回退全量，订阅不会变空。</p>
-        </div>
+        <textarea id="nodeLink" placeholder="粘贴 vless:// 节点链接"></textarea>
 
         <div class="actions">
-          <p class="hint">提示：点击“保存并生成”会把当前 VLESS 节点保存为模板；“仅显示订阅”不会修改模板。订阅链接默认需要只读 token，公开模式必须显式开启。</p>
           <div class="button-row">
-            <button id="showOnly" class="secondary" type="button">仅显示订阅</button>
-            <button id="generate" type="button">保存并生成</button>
+            <button id="generate" type="button">生成优选订阅</button>
           </div>
         </div>
 
         <div id="result" class="result" aria-live="polite">
-          <h2>生成结果</h2>
-          <p id="resultHint">已生成订阅链接，可直接复制到客户端。</p>
+          <h2>优选订阅</h2>
+          <p id="resultHint">把上面的节点链接粘贴进来，点生成即可。</p>
           <div id="subscriptionList" class="subscription-list"></div>
         </div>
+
+        <details style="margin-top: 16px;">
+          <summary style="cursor: pointer; color: var(--muted); font-size: 14px;">只读 token 设置（首次使用需配置一次）</summary>
+          <div style="margin-top: 12px;">
+            <label for="readTokenInput">只读 token</label>
+            <input id="readTokenInput" type="password" placeholder="粘贴只读 token" autocomplete="off">
+            <p class="hint">只保存在本机浏览器 localStorage，不会上传。订阅链接会自动带上它。</p>
+            <button id="saveReadToken" class="secondary" type="button">保存</button>
+          </div>
+        </details>
       </div>
 
       <aside class="status-card" aria-label="状态">
@@ -265,35 +250,19 @@
   </main>
 
   <script>
-    const subscriptions = [
-      ["VLESS", "/sub?type=vless"],
-      ["v2rayNG", "/sub?type=v2rayng"],
-      ["Clash", "/sub?type=clash"],
-      ["Sing-box", "/sub?type=singbox"],
-      ["Shadowrocket", "/sub?type=shadowrocket"],
-      ["优选列表", "/best?n=20"],
-    ];
     const READ_TOKEN_STORAGE_KEY = "preferred-sub-generator:read-token";
     let readToken = "";
-    let readTokenConfigured = false;
     try {
       readToken = localStorage.getItem(READ_TOKEN_STORAGE_KEY) || "";
     } catch {
       readToken = "";
     }
-    const adminTokenInput = document.getElementById("adminToken");
     const nodeLinkInput = document.getElementById("nodeLink");
-    const formatSelect = document.getElementById("format");
-    const coloInput = document.getElementById("coloFilter");
     const subscriptionList = document.getElementById("subscriptionList");
     const result = document.getElementById("result");
     const resultHint = document.getElementById("resultHint");
-
-    const tokenFromUrl = location.hash.replace(/^#token=/, "").trim();
-    if (tokenFromUrl) {
-      adminTokenInput.value = tokenFromUrl;
-      history.replaceState(null, "", location.pathname);
-    }
+    const readTokenInput = document.getElementById("readTokenInput");
+    if (readToken) readTokenInput.value = readToken;
 
     const formatTime = (value) => {
       if (!value) return "暂无数据";
@@ -302,11 +271,32 @@
       return date.toLocaleString("zh-CN", { hour12: false });
     };
 
-    function buildUrl(path) {
-      const url = new URL(path, location.origin);
+    function parseVlessLink(link) {
+      // 解析 vless://uuid@host:port?params#name，提取节点配置
+      const url = new URL(link);
+      if (url.protocol !== "vless:") throw new Error("必须是 vless:// 链接");
+      const params = Object.fromEntries(url.searchParams.entries());
+      return {
+        uuid: decodeURIComponent(url.username),
+        sni: params.sni || params.peer || "",
+        host: params.host || "",
+        path: params.path ? decodeURIComponent(params.path) : "",
+        port: url.port ? Number(url.port) : 443,
+        type: params.type || "ws",
+        security: params.security || "tls",
+      };
+    }
+
+    function buildSubscriptionUrl(config) {
+      const url = new URL("/sub", location.origin);
       if (readToken) url.searchParams.set("t", readToken);
-      const colo = coloInput.value.trim();
-      if (colo) url.searchParams.set("colo", colo);
+      url.searchParams.set("uuid", config.uuid);
+      if (config.sni) url.searchParams.set("sni", config.sni);
+      if (config.host) url.searchParams.set("host", config.host);
+      if (config.path) url.searchParams.set("path", config.path);
+      if (config.port && config.port !== 443) url.searchParams.set("port", String(config.port));
+      if (config.type && config.type !== "ws") url.searchParams.set("type", config.type);
+      if (config.security && config.security !== "tls") url.searchParams.set("security", config.security);
       return url.toString();
     }
 
@@ -320,42 +310,16 @@
       }[char]));
     }
 
-    function renderSubscriptions() {
-      const preferredFormat = formatSelect.value;
-      const ordered = [...subscriptions].sort(([name, path]) => path.includes(`type=${preferredFormat}`) ? -1 : 1);
-      subscriptionList.innerHTML = ordered.map(([name, path], index) => {
-        const fullUrl = buildUrl(path);
-        return `
-          <div class="subscription-item">
-            <div class="sub-name">${escapeHtml(name)}</div>
-            <code id="sub-${index}">${escapeHtml(fullUrl)}</code>
-            <button type="button" data-copy="${index}">复制</button>
-          </div>
-        `;
-      }).join("");
+    function renderSubscription(url) {
+      subscriptionList.innerHTML = `
+        <div class="subscription-item">
+          <div class="sub-name">优选订阅</div>
+          <code id="sub-0">${escapeHtml(url)}</code>
+          <button type="button" data-copy="0">复制</button>
+        </div>
+      `;
     }
 
-
-    async function loadReadToken(adminToken) {
-      try {
-        const headers = {};
-        if (adminToken) headers.Authorization = `Bearer ${adminToken}`;
-        const response = await fetch("/api/read-token", { headers });
-        const data = await response.json().catch(() => ({}));
-        readTokenConfigured = Boolean(data.configured);
-        if (!data.configured) {
-          readToken = "";
-          try { localStorage.removeItem(READ_TOKEN_STORAGE_KEY); } catch {}
-        } else if (typeof data.readToken === "string" && data.readToken) {
-          readToken = data.readToken;
-          try { localStorage.setItem(READ_TOKEN_STORAGE_KEY, readToken); } catch {}
-        }
-      } catch {
-        // 保留 localStorage 里的只读 token
-      }
-      renderSubscriptions();
-      return readToken;
-    }
 
     function renderTemplatePreview(preview) {
       if (!preview) return "";
@@ -382,59 +346,37 @@
       textarea.remove();
     }
 
-    async function saveTemplate(nodeLink, token) {
-      const response = await fetch("/api/template", {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ template: nodeLink }),
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data.error || "模板保存失败");
-      }
-      return data;
-    }
 
-    document.getElementById("showOnly").addEventListener("click", async () => {
-      result.classList.add("visible");
-      const adminToken = adminTokenInput.value.trim();
-      if (adminToken) await loadReadToken(adminToken);
-      if (readToken) {
-        resultHint.textContent = "已显示订阅链接，已自动附带只读 token，可直接复制到客户端导入。";
-      } else if (readTokenConfigured) {
-        resultHint.textContent = "已显示订阅链接；线上已配置只读 token，请先在“管理 token”里填入 SUB_TOKEN 并点击任一按钮换取，订阅链接才会自动附带。";
-      } else {
-        resultHint.textContent = "已显示订阅链接；当前部署未配置 SUB_READ_TOKEN，订阅接口仍需要只读 token。";
-      }
-      renderSubscriptions();
+    document.getElementById("saveReadToken").addEventListener("click", () => {
+      readToken = readTokenInput.value.trim();
+      try {
+        if (readToken) localStorage.setItem(READ_TOKEN_STORAGE_KEY, readToken);
+        else localStorage.removeItem(READ_TOKEN_STORAGE_KEY);
+      } catch {}
+      resultHint.textContent = readToken ? "只读 token 已保存到本机。" : "已清除本机只读 token。";
     });
 
-    document.getElementById("generate").addEventListener("click", async () => {
+    document.getElementById("generate").addEventListener("click", () => {
       const nodeLink = nodeLinkInput.value.trim();
-      const token = adminTokenInput.value.trim();
       result.classList.add("visible");
       if (!nodeLink.startsWith("vless://")) {
         resultHint.innerHTML = "<span class='danger'>请先粘贴 vless:// 节点链接。</span>";
-      } else if (!token) {
-        resultHint.innerHTML = "<span class='warn'>请先填写管理 token，用来保存原始 VLESS 模板。</span> 订阅链接的只读 token 也通过管理 token 换取，不会带管理 token 本身。";
-      } else {
-        try {
-          const data = await saveTemplate(nodeLink, token);
-          await loadReadToken(token);
-          resultHint.innerHTML = `已保存节点模板，并生成订阅链接。${readToken ? "订阅链接已自动附带只读 token（由管理 token 换取），不会带管理 token。" : readTokenConfigured ? "线上已配置 SUB_READ_TOKEN，但换取失败，请确认管理 token 是否正确。" : "当前部署未读取到 SUB_READ_TOKEN；请先在 Cloudflare Pages 环境变量设置 SUB_READ_TOKEN。"}${renderTemplatePreview(data.preview)}`;
-        } catch (error) {
-          resultHint.innerHTML = `<span class='danger'>${escapeHtml(error.message)}</span>`;
-        }
+        return;
       }
-      renderSubscriptions();
+      if (!readToken) {
+        resultHint.innerHTML = "<span class='warn'>请先在下方「只读 token 设置」里填入 token（只需一次）。</span>";
+        return;
+      }
+      try {
+        const config = parseVlessLink(nodeLink);
+        if (!config.uuid) throw new Error("节点链接中没有 UUID");
+        const subUrl = buildSubscriptionUrl(config);
+        renderSubscription(subUrl);
+        resultHint.textContent = "已生成优选订阅链接，可直接复制到客户端。节点信息来自你粘贴的链接，项目本身不保存任何模板。";
+      } catch (error) {
+        resultHint.innerHTML = `<span class='danger'>${escapeHtml(error.message)}</span>`;
+      }
     });
-
-    formatSelect.addEventListener("change", renderSubscriptions);
-    coloInput.addEventListener("input", renderSubscriptions);
-    loadReadToken();
     subscriptionList.addEventListener("click", async (event) => {
       const button = event.target.closest("button[data-copy]");
       if (!button) return;
@@ -534,7 +476,6 @@
       speedtestResult.textContent = "已回传，无需重复操作";
     });
 
-    renderSubscriptions();
   </script>
 </body>
 </html>
