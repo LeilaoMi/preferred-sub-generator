@@ -10,7 +10,7 @@
 
 ## 功能特性
 
-- 模板分项配置（UUID / SNI / Host / 路径 / 端口 / 传输 / TLS），保存时自动校验风险项。
+- 节点配置来自环境变量离散配置（VLESS_UUID / VLESS_SNI / VLESS_HOST / VLESS_PATH 等，对标竞品），项目内不保存任何模板；管理页只读展示当前配置并校验风险项（如 workers.dev SNI 在中国大陆被阻断）。
   粘贴 `vless://` 链接仅做导入填充，仍需逐项检查后保存——不再静默照抄整条链接。
   SNI 为 `workers.dev` / `pages.dev` 等已知被 SNI 阻断的域名时会给出明确警告（仍可保存）。
 - 自动聚合 Cloudflare Edge 候选源（当前默认只保留 Cloudflare 官方源，避免第三方源混入中转 IP）：
@@ -21,7 +21,7 @@
 - 候选源并行抓取：多源同时拉取，单源 10 秒超时隔离，一个源挂掉不拖慢整轮刷新；每源健康状态记入 `SOURCE_HEALTH`。
 - CSV 源按表头解析：按列名（ip/端口/tls/速度/数据中心）定位，不再依赖固定列顺序；上游加列不再静默错位。
 - 自动检测候选 IP 的可达性、延迟、抖动和 Cloudflare COLO：每个候选测 3 次取延迟抖动（标准差），抖动大的节点在排序中被惩罚。
-- 扫描只做"资格审查"，不发榜：GitHub Actions 用**你的模板域名**当 SNI 逐个直连候选 IP，要求返回 2xx（含 cf-ray）才算过审；rtt 超过 1000ms（`SUB_RTT_DROP_MS` 可配）直接淘汰；过审结果按 IP 地址聚合为"过审池"写入 KV（单个 IP 记下全部过审端口，池上限 300）。官方网段每个 CIDR 抽 16 个样本。
+- 扫描只做"资格审查"，不发榜：GitHub Actions 用 **VLESS_SNI** 当 SNI 逐个直连候选 IP，要求返回 2xx（含 cf-ray）才算过审；rtt 超过 1000ms（`SUB_RTT_DROP_MS` 可配）直接淘汰；过审结果按 IP 地址聚合为"过审池"写入 KV（单个 IP 记下全部过审端口，池上限 300）。官方网段每个 CIDR 抽 16 个样本。
 - 节点排序用多维加权评分公式：`score = (wS·带宽 + wC·落点加成 + 0.1) / (1 + wR·延迟 + wJ·抖动)`，各维度归一化，权重经 `SUB_SCORE_W_*` 环境变量可调；rtt 只做淘汰门槛，不再主导排名（美国扫描机的握手延迟不代表你的真实体验）。
 - 抽样模式（`mode=sample`）与固定榜共用同一评分公式做加权随机抽样。
 - 订阅有两种发法：默认是固定榜（历史行为）；`mode=sample` 是抽样模式——先按落点分桶，再从池里加权随机抽，每次拉取换一批，本地实测只提高被抽中权重、不再决定名次。
@@ -45,7 +45,7 @@
 - IPv6 独立通道：IPv6 候选不再因无 v6 测速环境被一刀切丢弃，收录进独立池 `BEST_IPS_V6`（标记未实测），`/sub?ip6=1` 追加返回，节点名带 `[IPv6]` 前缀，不占常规名额。
 - 端口优先级可配：`SUB_PREFERRED_PORTS` 环境变量覆盖端口顺序（默认 443 优先，基于国内运营商实测）；换线路不用改代码。
 - 支持在本机探测每个候选 IP 的 TCP 握手延迟、落地 COLO 和下载带宽，回传 `/api/ip-feedback` 后：默认订阅按你的实测结果重排，抽样模式下则按实测加权抽样——这是让代理真正变快的关键一步。
-- 本地探测默认用**订阅模板的域名**当探测 SNI（`--slot` 选账号槽位、`--sni` 覆盖），因此能识别出「IP 活着但不服务你的 zone」的 `error code: 1034` 节点；这类节点会带 `ok:false` 回传，订阅生成时自动剔除（失败多于成功才剔，剔完为空则回退全量）。
+- 本地探测默认用 **VLESS_SNI 环境变量的域名**当探测 SNI（`--slot` 选账号槽位、`--sni` 覆盖），因此能识别出「IP 活着但不服务你的 zone」的 `error code: 1034` 节点；这类节点会带 `ok:false` 回传，订阅生成时自动剔除（失败多于成功才剔，剔完为空则回退全量）。
 - 首页状态卡显示「你的接入点」和「你的延迟」（你到 Cloudflare 边缘的真实 RTT，3 次取最小）。
 
 - 支持输出格式：
@@ -65,7 +65,7 @@
   - `/api/template`
   - `/api/ip-feedback`
 - `/sub`、`/best` 默认需要只读 token，避免真实订阅被公开拉取。
-- `/api/template` 需要管理 token，仅用于保存或读取原始 VLESS 模板，token 不会拼进订阅链接。
+- `/api/template` 需要管理 token，只读返回当前环境变量节点配置（含风险校验）；写入接口已下线（410），配置请去 Cloudflare Dashboard 的 Pages 环境变量修改。
 - API 默认带 noindex / nosniff / no-referrer 等安全响应头，`public/robots.txt` 默认禁止搜索引擎索引。
 - 管理接口带基础频率限制，并会清理过期/过量 IP 计数桶。
 - GitHub Actions 可每 6 小时自动刷新 Cloudflare KV 中的优选 IP。
@@ -143,7 +143,7 @@ KV 里 `BEST_IPS` 现在是过审 IP 池（按地址聚合，含各 IP 全部过
 
 `.github/workflows/deploy-pages.yml` 在 push 到 `main` 时自动部署到 Cloudflare Pages（`wrangler pages deploy public`，用仓库 Secrets 里的 `CLOUDFLARE_API_TOKEN_2` / `CLOUDFLARE_ACCOUNT_ID`）。改完代码 push 即可上线，不用再手动跑 wrangler。
 
-真实 VLESS 模板不放 GitHub Secrets。Actions 会读取 Cloudflare KV 中已保存的 `TEMPLATE`。
+节点探测参数通过 GitHub Actions Variables 传入（`VLESS_SNI` / `VLESS_HOST` / `VLESS_SECURITY`），与 Pages 环境变量保持一致；UUID 不需要进 GHA。
 
 ### 不建议直接部署到普通静态托管
 
@@ -159,14 +159,14 @@ KV 里 `BEST_IPS` 现在是过审 IP 池（按地址聚合，含各 IP 全部过
 .github/workflows/update.yml     GitHub Actions 定时刷新 KV
 .github/workflows/deploy-pages.yml  push 到 main 自动部署到 Cloudflare Pages
 public/index.html                中文首页，粘贴 VLESS 并生成订阅
-public/admin.html                私用模板配置页
+public/admin.html                私用节点配置只读展示页
 functions/sub.js                 订阅接口
 functions/best.js                优选 IP 列表接口
 functions/versions.js            优选 IP 版本索引接口
 functions/status.js              公开状态接口
 functions/health.js              健康检查接口
 functions/api/read-token.js      用管理 token 换取 SUB_READ_TOKEN，用于首页自动拼订阅 URL
-functions/api/template.js        模板读取/保存接口
+functions/api/template.js        节点配置只读接口（POST 已下线）
 functions/api/speedtest-feedback.js  浏览器本地测速结果回传与汇总
 functions/api/ip-feedback.js      逐 IP 实测数据回传与读取
 src/api/node-filter.js            线路过滤与按实测数据重排
@@ -199,7 +199,6 @@ sources/edge/remote.json         远程 CF Edge 候选源
 在 Cloudflare Dashboard 创建 KV Namespace，用来保存：
 
 ```text
-TEMPLATE   模板（规范 JSON：uuid/sni/host/path/port/security/type/params），由管理页分项保存；旧版 vless:// 字符串自动兼容读取
 BEST_IPS   最新优选 Edge IP 列表
 BEST_IPS_V6      IPv6 候选独立池（未实测标记，仅 ?ip6=1 时返回）
 BEST_IPS_LAST      最近一次写入的优选结果
@@ -208,7 +207,6 @@ BEST_IPS_VERSION_INDEX  最近版本索引，默认只保留 30 个 BEST_IPS_* �
 BEST_IPS_TREND     最近 7 次刷新趋势
 STATUS     更新时间、可用数量、检测状态、连续 fallback、最近成功刷新时间
 SOURCE_HEALTH      最近一次候选源抓取健康报告，含每源状态、候选数、错误和耗时
-TEMPLATE_AUDIT     最近一次模板更新审计信息
 SPEED_FEEDBACK     浏览器本地测速反馈记录（D1 未绑定时的回退存储），最多保留 500 条，由 /api/speedtest-feedback 写入
 LAST_RUN_*       最近一次 GitHub Actions 自动刷新结果
 ```
@@ -238,7 +236,19 @@ KV 绑定变量名：SUB_KV
 Cloudflare Pages 生产环境需要设置：
 
 ```text
-SUB_TOKEN   管理 token，用于保存/读取原始 VLESS 模板
+SUB_TOKEN   管理 token，用于管理接口鉴权
+```
+
+节点配置（对标竞品离散配置，必填，项目内不再存模板）：
+
+```text
+VLESS_UUID       节点 UUID（建议设为 Secret）
+VLESS_SNI        TLS 握手域名（SNI），决定客户端握手时看到的域名
+VLESS_HOST       HTTP Host，决定流量路由到哪个后端
+VLESS_PATH       WS 路径，默认为空
+VLESS_PORT       默认 443
+VLESS_TYPE       默认 ws
+VLESS_SECURITY   默认 tls
 ```
 
 建议同时设置：
@@ -316,7 +326,19 @@ Namespace：你创建的 KV
 7. 添加生产环境变量：
 
 ```text
-SUB_TOKEN   管理 token，用于保存/读取原始 VLESS 模板
+SUB_TOKEN   管理 token，用于管理接口鉴权
+```
+
+节点配置（对标竞品离散配置，必填，项目内不再存模板）：
+
+```text
+VLESS_UUID       节点 UUID（建议设为 Secret）
+VLESS_SNI        TLS 握手域名（SNI），决定客户端握手时看到的域名
+VLESS_HOST       HTTP Host，决定流量路由到哪个后端
+VLESS_PATH       WS 路径，默认为空
+VLESS_PORT       默认 443
+VLESS_TYPE       默认 ws
+VLESS_SECURITY   默认 tls
 ```
 
 8. 部署。
