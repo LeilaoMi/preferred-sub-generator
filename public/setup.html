@@ -79,6 +79,8 @@
       <form id="form" hidden>
         <label for="token">管理 token（至少 12 位，自己定一个好记的）</label>
         <input id="token" type="password" autocomplete="new-password" minlength="12" required>
+        <label for="token2">再输一次（设置后即锁定，输错会很麻烦）</label>
+        <input id="token2" type="password" autocomplete="new-password" minlength="12" required>
         <button type="submit" id="submit">保存</button>
         <p id="msg"></p>
       </form>
@@ -108,11 +110,18 @@
       }
     })();
 
+    const tokenInput2 = document.getElementById("token2");
+
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       const token = tokenInput.value.trim();
       if (token.length < 12) {
         msg.textContent = "管理 token 至少 12 位。";
+        msg.className = "err";
+        return;
+      }
+      if (tokenInput2.value.trim() !== token) {
+        msg.textContent = "两次输入不一致，请重新输入。";
         msg.className = "err";
         return;
       }
@@ -130,6 +139,7 @@
           msg.textContent = "已保存。请用这个 token 运行探测脚本回传（--token 参数）。";
           msg.className = "ok";
           tokenInput.value = "";
+          tokenInput2.value = "";
         } else {
           msg.textContent = data.error || `保存失败（${response.status}）`;
           msg.className = "err";
