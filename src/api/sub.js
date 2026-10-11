@@ -86,21 +86,34 @@ export async function handleSub(request, env) {
   const explicitType = url.searchParams.get("type");
   const type = edgeProbe ? "base64" : (explicitType || inferTypeFromUa(request.headers.get("user-agent")) || "vless").toLowerCase();
   const sampleMode = url.searchParams.get("mode") === "sample";
-  // 节点参数：URL 查询参数优先（无状态，对标其他订阅器），环境变量兜底；
-  // edgetunnel 探测旁路用占位值，不走 URL 参数
-  let nodeConfig = edgeProbe ? null : getNodeConfigFromUrl(url);
-  if (!nodeConfig) {
-    try {
-      nodeConfig = getNodeConfig(env);
-    } catch (error) {
-      return jsonResponse({ error: "缺少节点配置：请在订阅 URL 中携带 uuid/sni/host 等参数，或配置 VLESS_* 环境变量" }, 400);
+  // 节点参数：URL 查询参数优先（无状态，对标其他订阅器），环境变量兜底。
+  // edgetunnel 探测直接用占位模板，不需要真实节点配置（edgetunnel 只提取 IP，节点信息用它自己的）。
+  let template;
+  if (edgeProbe) {
+    template = {
+      uuid: EDGE_PROBE_UUID,
+      host: "example.com",
+      sni: "example.com",
+      path: "/",
+      port: 443,
+      type: "ws",
+      security: "tls",
+    };
+  } else {
+    let nodeConfig = getNodeConfigFromUrl(url);
+    if (!nodeConfig) {
+      try {
+        nodeConfig = getNodeConfig(env);
+      } catch (error) {
+        return jsonResponse({ error: "缺少节点配置：请在订阅 URL 中携带 uuid/sni/host 等参数，或配置 VLESS_* 环境变量" }, 400);
+      }
     }
+    const configWarnings = validateNodeConfig(nodeConfig);
+    if (configWarnings.some((w) => w.level === "error")) {
+      return jsonResponse({ error: configWarnings.find((w) => w.level === "error").message }, 500);
+    }
+    template = nodeConfigToTemplate(nodeConfig);
   }
-  const configWarnings = validateNodeConfig(nodeConfig);
-  if (configWarnings.some((w) => w.level === "error")) {
-    return jsonResponse({ error: configWarnings.find((w) => w.level === "error").message }, 500);
-  }
-  const template = nodeConfigToTemplate(nodeConfig);
   const { colos } = parseColoFilter(url.searchParams.get("colo"), request);
   let nodes = await readBestIps(env.SUB_KV);
   let scores = null;
@@ -139,8 +152,7 @@ export async function handleSub(request, env) {
   }
 
   if (edgeProbe) {
-    const probeTemplate = { ...template, uuid: EDGE_PROBE_UUID, host: "example.com", sni: "example.com", path: "/" };
-    return privateTextResponse(base64Encode(generateVlessSubscription(probeTemplate, nodes, nameOptions)), "text/plain; charset=utf-8", subscriptionHeaders("preferred-sub-edge.txt"));
+    return privateTextResponse(base64Encode(generateVlessSubscription(template, nodes, nameOptions)), "text/plain; charset=utf-8", subscriptionHeaders("preferred-sub-edge.txt"));
   }
 
   if (type === "vless") {
