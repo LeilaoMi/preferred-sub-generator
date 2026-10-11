@@ -195,15 +195,7 @@
           <div id="subscriptionList" class="subscription-list"></div>
         </div>
 
-        <details style="margin-top: 16px;">
-          <summary style="cursor: pointer; color: var(--muted); font-size: 14px;">只读 token 设置（私用部署填一次；公开部署 SUB_PUBLIC=1 可跳过）</summary>
-          <div style="margin-top: 12px;">
-            <label for="readTokenInput">只读 token</label>
-            <input id="readTokenInput" type="password" placeholder="粘贴只读 token" autocomplete="off">
-            <p class="hint">只保存在本机浏览器 localStorage，不会上传。订阅链接会自动带上它。</p>
-            <button id="saveReadToken" class="secondary" type="button">保存</button>
-          </div>
-        </details>
+
       </div>
 
       <aside class="status-card" aria-label="状态">
@@ -250,19 +242,11 @@
   </main>
 
   <script>
-    const READ_TOKEN_STORAGE_KEY = "preferred-sub-generator:read-token";
-    let readToken = "";
-    try {
-      readToken = localStorage.getItem(READ_TOKEN_STORAGE_KEY) || "";
-    } catch {
-      readToken = "";
-    }
     const nodeLinkInput = document.getElementById("nodeLink");
     const subscriptionList = document.getElementById("subscriptionList");
     const result = document.getElementById("result");
     const resultHint = document.getElementById("resultHint");
-    const readTokenInput = document.getElementById("readTokenInput");
-    if (readToken) readTokenInput.value = readToken;
+
 
     const formatTime = (value) => {
       if (!value) return "暂无数据";
@@ -289,7 +273,6 @@
 
     function buildSubscriptionUrl(config) {
       const url = new URL("/sub", location.origin);
-      if (readToken) url.searchParams.set("t", readToken);
       url.searchParams.set("uuid", config.uuid);
       if (config.sni) url.searchParams.set("sni", config.sni);
       if (config.host) url.searchParams.set("host", config.host);
@@ -346,15 +329,6 @@
       textarea.remove();
     }
 
-
-    document.getElementById("saveReadToken").addEventListener("click", () => {
-      readToken = readTokenInput.value.trim();
-      try {
-        if (readToken) localStorage.setItem(READ_TOKEN_STORAGE_KEY, readToken);
-        else localStorage.removeItem(READ_TOKEN_STORAGE_KEY);
-      } catch {}
-      resultHint.textContent = readToken ? "只读 token 已保存到本机。" : "已清除本机只读 token。";
-    });
 
     document.getElementById("generate").addEventListener("click", () => {
       const nodeLink = nodeLinkInput.value.trim();

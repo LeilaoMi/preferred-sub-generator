@@ -11,7 +11,6 @@ test("homepage is Chinese, paste-link-to-generate (no template)", async () => {
   assert.match(html, /生成优选订阅/);
   assert.match(html, /parseVlessLink/);
   assert.match(html, /buildSubscriptionUrl/);
-  assert.match(html, /只读 token 设置/);
   assert.match(html, /项目本身不保存任何模板/);
   assert.match(html, /function escapeHtml/);
   assert.match(html, /复制/);
