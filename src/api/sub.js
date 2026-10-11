@@ -6,7 +6,7 @@ import { requireReadAuth } from "../security/auth.js";
 import { jsonResponse, privateTextResponse, unauthorizedResponse } from "../utils/response.js";
 import { formatEdgeNodeName } from "../utils/colo.js";
 import { loadIpScores } from "./ip-feedback.js";
-import { getNodeConfig, nodeConfigToTemplate, validateNodeConfig } from "../config/nodes.js";
+import { getNodeConfig, getNodeConfigFromUrl, nodeConfigToTemplate, validateNodeConfig } from "../config/nodes.js";
 import { readBestIps, readBestIpsV6 } from "./kv.js";
 import { filterNodesByColo, parseColoFilter, rankNodesByScore, sampleNodes, withPreferredPort } from "./node-filter.js";
 import { getPreferredPortOrder } from "../utils/ports.js";
@@ -86,12 +86,15 @@ export async function handleSub(request, env) {
   const explicitType = url.searchParams.get("type");
   const type = edgeProbe ? "base64" : (explicitType || inferTypeFromUa(request.headers.get("user-agent")) || "vless").toLowerCase();
   const sampleMode = url.searchParams.get("mode") === "sample";
-  // 节点参数来自环境变量（对标竞品离散配置），不再读 KV 模板
-  let nodeConfig;
-  try {
-    nodeConfig = getNodeConfig(env);
-  } catch (error) {
-    return jsonResponse({ error: error.message }, 500);
+  // 节点参数：URL 查询参数优先（无状态，对标其他订阅器），环境变量兜底；
+  // edgetunnel 探测旁路用占位值，不走 URL 参数
+  let nodeConfig = edgeProbe ? null : getNodeConfigFromUrl(url);
+  if (!nodeConfig) {
+    try {
+      nodeConfig = getNodeConfig(env);
+    } catch (error) {
+      return jsonResponse({ error: "缺少节点配置：请在订阅 URL 中携带 uuid/sni/host 等参数，或配置 VLESS_* 环境变量" }, 400);
+    }
   }
   const configWarnings = validateNodeConfig(nodeConfig);
   if (configWarnings.some((w) => w.level === "error")) {

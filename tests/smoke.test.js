@@ -64,9 +64,9 @@ test("smoke: wrong template token returns 401", async () => {
 
 test("smoke: missing node config causes sub to fail", async () => {
   const response = await handleSub(new Request("https://example.com/sub?type=vless&t=read-token"), createEnv({ hasConfig: false }));
-  assert.equal(response.status, 500);
+  assert.equal(response.status, 400);
   const parsed = await response.json();
-  assert.match(parsed.error, /VLESS_UUID/);
+  assert.match(parsed.error, /缺少节点配置/);
 });
 
 test("smoke: empty BEST_IPS returns 503", async () => {

@@ -19,6 +19,22 @@ export const RISKY_SNI_PATTERNS = [
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** 从 URL 查询参数读取节点配置（无状态，对标其他订阅器做法） */
+export function getNodeConfigFromUrl(url) {
+  const params = url.searchParams;
+  const uuid = (params.get("uuid") || "").trim();
+  if (!uuid) return null; // 没有 uuid 参数，走环境变量兜底
+  return {
+    uuid,
+    sni: (params.get("sni") || "").trim(),
+    host: (params.get("host") || "").trim(),
+    path: (params.get("path") || "").trim(),
+    port: Number(params.get("port")) || 443,
+    type: (params.get("type") || "ws").trim() || "ws",
+    security: (params.get("security") || "tls").trim() || "tls",
+  };
+}
+
 /** 从环境变量读取节点配置，缺失必填项时抛错（信息指引去 Dashboard 补） */
 export function getNodeConfig(env = {}) {
   const uuid = String(env.VLESS_UUID || "").trim();

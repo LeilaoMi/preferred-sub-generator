@@ -68,3 +68,19 @@ test("nodeConfigToTemplate: 生成器可用形状", () => {
     assert.ok(k in t, `missing ${k}`);
   }
 });
+
+test("getNodeConfigFromUrl: 从 URL 参数读取", async () => {
+  const { getNodeConfigFromUrl } = await import("../src/config/nodes.js");
+  const url = new URL("https://example.com/sub?uuid=22222222-2222-4222-8222-222222222222&sni=s.example&host=h.example&path=/ws");
+  const c = getNodeConfigFromUrl(url);
+  assert.equal(c.uuid, "22222222-2222-4222-8222-222222222222");
+  assert.equal(c.sni, "s.example");
+  assert.equal(c.host, "h.example");
+  assert.equal(c.path, "/ws");
+});
+
+test("getNodeConfigFromUrl: 无 uuid 返回 null 走兜底", async () => {
+  const { getNodeConfigFromUrl } = await import("../src/config/nodes.js");
+  const url = new URL("https://example.com/sub?type=vless");
+  assert.equal(getNodeConfigFromUrl(url), null);
+});
