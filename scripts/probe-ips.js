@@ -123,7 +123,8 @@ async function fetchTemplateHost(site, token, slot) {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) return { host: "", key: "" };
     const safe = data.templateSafe || {};
-    return { host: String(safe.host || safe.sni || "").trim(), key: String(data.key || "") };
+    // 域名前置时 TLS SNI 必须用 sni（干净域名），不能用 host（可能被 SNI 阻断）
+    return { host: String(safe.sni || safe.host || "").trim(), key: String(data.key || "") };
   } catch {
     return { host: "", key: "" };
   }
