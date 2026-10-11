@@ -10,8 +10,9 @@
 
 ## 功能特性
 
-- 支持粘贴 `vless://` 原始节点，解析并保存为私用模板。
-- 自动识别并保留：UUID、端口、TLS、WS、Host、SNI、path、节点备注等参数。
+- 模板分项配置（UUID / SNI / Host / 路径 / 端口 / 传输 / TLS），保存时自动校验风险项。
+  粘贴 `vless://` 链接仅做导入填充，仍需逐项检查后保存——不再静默照抄整条链接。
+  SNI 为 `workers.dev` / `pages.dev` 等已知被 SNI 阻断的域名时会给出明确警告（仍可保存）。
 - 自动聚合 Cloudflare Edge 候选源（当前默认只保留 Cloudflare 官方源，避免第三方源混入中转 IP）：
   - Cloudflare 官方 IPv4 CIDR（`https://www.cloudflare.com/ips-v4/`）。
   - Cloudflare 官方 IPv6 CIDR（`https://www.cloudflare.com/ips-v6/`）。
@@ -198,7 +199,7 @@ sources/edge/remote.json         远程 CF Edge 候选源
 在 Cloudflare Dashboard 创建 KV Namespace，用来保存：
 
 ```text
-TEMPLATE   原始 VLESS 模板，由网页保存
+TEMPLATE   模板（规范 JSON：uuid/sni/host/path/port/security/type/params），由管理页分项保存；旧版 vless:// 字符串自动兼容读取
 BEST_IPS   最新优选 Edge IP 列表
 BEST_IPS_V6      IPv6 候选独立池（未实测标记，仅 ?ip6=1 时返回）
 BEST_IPS_LAST      最近一次写入的优选结果
