@@ -716,6 +716,8 @@ SUB_TOKEN=你的管理token SITE_URL=https://你的域名 node scripts/probe-ips
 
 ```text
 --speed 5        每个 IP 下载测 5MB 再测带宽（默认 2，0 = 只测延迟）
+--samples 3      每个 IP 握手采样次数（默认 3）；成功数过半才算可用，
+                 延迟取中位数，筛掉时通时断的抖动节点；1 = 单次（旧行为）
 --colo auto      只探测你接入点的线路；或 --colo HKG,NRT
 --n 20           只测前 20 个候选
 --slot 2         用第 2 个账号槽位的模板当默认 SNI（1-5）
@@ -727,7 +729,7 @@ SUB_TOKEN=你的管理token SITE_URL=https://你的域名 node scripts/probe-ips
 
 **探测 SNI 默认取订阅模板的域名**（`--sni` 显式指定时优先，取不到模板才回退 `speed.cloudflare.com`）。这点很关键：Cloudflare 的 `error code: 1034` 是「这个 IP 活着，但不服务你的 zone」，只有用**你实际在用的那个域名**去连才暴露得出来；用 `speed.cloudflare.com` 测的话，这类 IP 照样是绿的。脚本启动时会打印它实际用的 SNI 和来源。
 
-脚本分两步：先并发测每个候选的 TCP 握手延迟和连该 IP 时的落地 COLO（`/cdn-cgi/trace`），再以并发 2 测下载带宽，最后打印排序结果并回传 `/api/ip-feedback`。**连不上的、或对该域名拿不到可用回包的 IP 会带 `ok:false` 一起回传**，服务端据此把它们从订阅里剔掉，不用你手动挑。
+脚本分两步：先对每个候选做 `--samples` 次 TCP 握手采样（默认 3 次，成功过半才算可用，延迟取中位数并打印抖动），同时测连该 IP 时的落地 COLO（`/cdn-cgi/trace`），再以并发 2 测下载带宽，最后打印排序结果并回传 `/api/ip-feedback`。**连不上的、握手抖动的、或对该域名拿不到可用回包的 IP 会带 `ok:false` 一起回传**，服务端据此把它们从订阅里剔掉，不用你手动挑。
 
 ### 回传之后
 

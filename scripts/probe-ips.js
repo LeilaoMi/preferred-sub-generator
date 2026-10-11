@@ -15,6 +15,8 @@ const HELP = `用法: node scripts/probe-ips.js [选项]
   --site <url>          站点地址（默认 env SITE_URL，如 https://yxdy.woniu.bee.al）
   --token <token>       管理 token（默认 env SUB_TOKEN；无 token 时加 --no-submit 只测不回传）
   --n <count>           探测节点数量（默认 50）
+  --samples <n>         每个 IP 的 TCP 握手采样次数（默认 3）；成功数过半才算可用，
+                        延迟取中位数，可筛掉时通时断的抖动节点；1 表示单次（旧行为）
   --speed <MB>          每个 IP 下载测速大小，默认 2；0 表示只测延迟
   --sni <host>          测速用 SNI/Host（默认取订阅模板的域名，取不到才用 speed.cloudflare.com）
   --slot <n>            取哪个账号槽位的模板（1-5），决定默认 SNI
@@ -37,6 +39,45 @@ function parseTrace(text) {
   const region = (body.match(/loc=(\w+)/) || [])[1] || "";
   if (!colo && !region) return null;
   return { colo: colo.toUpperCase(), region };
+}
+
+export function median(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  if (sorted.length === 0) return null;
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+export function sampleStddev(values) {
+  if (values.length < 2) return 0;
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / values.length;
+  return Math.sqrt(variance);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// 对单个 IP 做多次 TCP 握手采样：一次成功可能是运气，多次才能看出稳不稳。
+// 返回成功延迟列表与失败次数，由 decideSample 按"成功数过半"判定可用性。
+export async function sampleTcpRtt(address, port, { samples = 3, timeoutMs = 5000, delayMs = 800, tcpRttImpl = tcpRtt } = {}) {
+  const rtts = [];
+  let failures = 0;
+  for (let i = 0; i < samples; i += 1) {
+    if (i > 0) await sleep(delayMs);
+    const rtt = await tcpRttImpl(address, port, timeoutMs);
+    if (rtt === null) failures += 1;
+    else rtts.push(rtt);
+  }
+  return { rtts, failures };
+}
+
+// 成功数过半才算可用（默认 3 次里至少成功 2 次）；延迟取中位数，抗单次毛刺。
+export function decideSample(rtts, samples) {
+  const need = Math.ceil(samples / 2);
+  if (rtts.length < need) return { ok: false, rtt: null };
+  return { ok: true, rtt: median(rtts) };
 }
 
 function tcpRtt(address, port, timeoutMs) {
@@ -150,11 +191,12 @@ function printTable(results) {
     item.address,
     String(item.port ?? "-"),
     item.rtt == null ? "-" : `${item.rtt}ms`,
+    item.jitter == null ? "-" : `±${item.jitter}ms`,
     item.colo || "-",
     item.region || "-",
     item.speed == null ? "-" : `${item.speed} Mbps`,
   ]);
-  const header = ["#", "地址", "端口", "RTT", "COLO", "地区", "带宽"];
+  const header = ["#", "地址", "端口", "RTT", "抖动", "COLO", "地区", "带宽"];
   const widths = header.map((title, column) => Math.max(title.length, ...rows.map((row) => [...row[column]].length)));
   const line = (row) => row.map((cell, column) => cell + " ".repeat(widths[column] - [...cell].length)).join("  ");
   console.log(line(header));
@@ -168,6 +210,7 @@ async function main() {
       site: { type: "string" },
       token: { type: "string" },
       n: { type: "string", default: "50" },
+      samples: { type: "string", default: "3" },
       speed: { type: "string", default: "2" },
       sni: { type: "string" },
       slot: { type: "string" },
@@ -191,6 +234,7 @@ async function main() {
   // token 可选：无 token 时需用 --sni 指定探测域名，且跳过反馈提交
 
   const count = Math.max(1, Math.min(Number(values.n) || 50, 200));
+  const samples = Math.max(1, Math.min(Number(values.samples) || 3, 5));
   const speedMb = Math.max(0, Number(values.speed) || 0);
   const timeoutMs = Math.max(1000, Number(values.timeout) || 5000);
   const concurrency = Math.max(1, Math.min(Number(values.concurrency) || 8, 32));
@@ -226,19 +270,22 @@ async function main() {
     console.log(`线路过滤 ${colos.join(",")}: ${filtered.matched ? `${nodes.length} 个匹配` : "无匹配，已回退全量"}`);
   }
 
-  console.log("1/2 测量 TCP 握手延迟与落地 COLO…");
+  console.log(`1/2 测量 TCP 握手延迟与落地 COLO（每个 IP 握手 ${samples} 次，成功过半才算可用）…`);
   const probed = await pool(nodes, concurrency, async (node) => {
     const address = String(node.address || "");
     const port = Number(node.port) || 443;
-    const rtt = await tcpRtt(address, port, timeoutMs);
-    if (rtt === null) {
-      return { address, port, rtt: null, colo: "", region: "", speed: null, ok: false };
+    const { rtts, failures } = await sampleTcpRtt(address, port, { samples, timeoutMs });
+    const decision = decideSample(rtts, samples);
+    if (!decision.ok) {
+      return { address, port, rtt: null, jitter: null, colo: "", region: "", speed: null, ok: false };
     }
+    const jitter = Math.round(sampleStddev(rtts) * 10) / 10;
     const trace = await traceEdge(address, port, { servername, timeoutMs });
     return {
       address,
       port,
-      rtt,
+      rtt: Math.round(decision.rtt * 10) / 10,
+      jitter,
       colo: trace?.colo || "",
       region: trace?.region || "",
       speed: null,
@@ -252,7 +299,7 @@ async function main() {
   if (alive.length === 0) throw new Error("所有节点都连不上，请检查网络");
   if (unreachable.length > 0) {
     const list = unreachable.map((item) => item.address);
-    console.log(`   ${unreachable.length} 个节点不可用（连不上或对该域名返回非 2xx）：${list.slice(0, 8).join(", ")}${list.length > 8 ? " …" : ""}`);
+    console.log(`   ${unreachable.length} 个节点不可用（连不上 / 握手抖动 / 对该域名返回非 2xx）：${list.slice(0, 8).join(", ")}${list.length > 8 ? " …" : ""}`);
   }
 
   if (speedMb > 0) {
@@ -295,7 +342,9 @@ async function main() {
   console.log(`订阅地址（按你的实测重排）: ${site}/sub?type=v2rayng&t=${readToken}`);
 }
 
-main().catch((error) => {
-  console.error(`失败: ${error.message}`);
-  process.exitCode = 1;
-});
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((error) => {
+    console.error(`失败: ${error.message}`);
+    process.exitCode = 1;
+  });
+}
