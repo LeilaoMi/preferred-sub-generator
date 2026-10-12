@@ -28,8 +28,11 @@ export function checkTcp(address, port, timeoutMs = 3000) {
       resolve(ok ? Date.now() - startedAt : null);
     }
 
+    // 硬超时：setTimeout 只管空闲，连接被对端静默关闭时不会触发
+    const hardTimer = setTimeout(() => finish(false), timeoutMs + 1000);
+    socket.once("close", () => { clearTimeout(hardTimer); finish(false); });
     socket.setTimeout(timeoutMs);
-    socket.once("connect", () => finish(true));
+    socket.once("connect", () => { clearTimeout(hardTimer); finish(true); });
     socket.once("timeout", () => finish(false));
     socket.once("error", () => finish(false));
   });
@@ -98,11 +101,12 @@ export function checkHttpEdge(address, port, { host, tlsEnabled, timeoutMs = 500
     });
     socket.once("timeout", () => finish(null));
     socket.once("error", () => finish(null));
-    socket.once("end", () => {
-      if (!done && buffer) {
-        finish(edgeResult(buffer));
-      }
-    });
+    // 对端不回包直接关闭（反代 IP 常见）时，之前 promise 永不 resolve，
+    // 事件循环清空后整个 update-kv 静默以 0 退出、KV 一个字都没写。
+    socket.once("end", () => finish(buffer ? edgeResult(buffer) : null));
+    socket.once("close", () => finish(buffer ? edgeResult(buffer) : null));
+    const hardTimer = setTimeout(() => finish(null), timeoutMs * 2 + 1000);
+    socket.once("close", () => clearTimeout(hardTimer));
   });
 }
 
