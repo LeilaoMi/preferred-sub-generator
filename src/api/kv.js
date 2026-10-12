@@ -26,6 +26,17 @@ export async function readBestIps(kv) {
   return Array.isArray(parsed) ? parsed : [];
 }
 
+// 待国内验证的反代 IP（美国初筛连不上，交给国内三网探针验证）
+export async function readPendingCnIps(kv) {
+  try {
+    const value = await kv.get("CN_PENDING_IPS");
+    const parsed = value ? JSON.parse(value) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 // P2-6: 未实测 IPv6 独立池
 export async function readBestIpsV6(kv) {
   const value = await kv.get("BEST_IPS_V6");

@@ -245,6 +245,22 @@ export async function buildUpdatePayload({
     source: item.source,
     jitter: jitterByAddress.has(item.address) ? jitterByAddress.get(item.address) : null,
   }));
+  // 反代 IP 大多只对国内来源开放，美国扫描机几乎都连不上。没过美国初筛的社区源 IPv4
+  // 放进待国内验证池 CN_PENDING_IPS，由 china-probe 用国内三网探针验证；
+  // 订阅只纳入其中国内实测 ok 的，未验证的永不进订阅。
+  const pendingLimit = Number(process.env.CN_PENDING_MAX) || 300;
+  const pendingCn = [];
+  if (process.env.ALLOW_RELAY !== "0") {
+    const passed = new Set(nextBestIps.map((item) => item.address));
+    for (const candidate of candidates) {
+      if (pendingCn.length >= pendingLimit) break;
+      if (candidate.source === "edge-manual" || !String(candidate.source || "").startsWith("cmliu")) continue;
+      if (passed.has(candidate.address) || !/^\d+\.\d+\.\d+\.\d+$/.test(candidate.address)) continue;
+      passed.add(candidate.address);
+      const port = Number(candidate.port) || 443;
+      pendingCn.push({ address: candidate.address, port, ports: [port], name: `待验证 ${candidate.address}`, latency: null, speed: null, colo: "", edgeVerified: false, source: candidate.source, pendingCn: true });
+    }
+  }
   const protectedByPrevious = nextBestIps.length < MIN_AVAILABLE_TO_OVERWRITE && Array.isArray(previousBestIps) && previousBestIps.length > 0;
   const bestIps = protectedByPrevious ? previousBestIps : nextBestIps;
   const versionKey = buildVersionKey(now);
@@ -276,6 +292,7 @@ export async function buildUpdatePayload({
   return {
     BEST_IPS: JSON.stringify(bestIps, null, 2),
     BEST_IPS_V6: JSON.stringify(v6Pool, null, 2),
+    CN_PENDING_IPS: JSON.stringify(pendingCn),
     [versionKey]: JSON.stringify(bestIps, null, 2),
     BEST_IPS_LAST: JSON.stringify(bestIps, null, 2),
     BEST_IPS_LATEST_VERSION: versionKey,
