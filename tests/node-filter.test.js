@@ -145,3 +145,31 @@ test("P1-3 preferredPort follows custom port order when provided", () => {
   // 覆盖顺序里没有的端口回退到原逻辑
   assert.equal(preferredPort({ address: "1.1.1.1", port: 2087, ports: [2087] }, [8443]), 2087);
 });
+
+import { selectVerifiedNodes as selectVerifiedNodesForTest } from "../src/api/node-filter.js";
+
+test("selectVerifiedNodes: 实测 ok > 手动置顶 > 补齐，判死剔除，结果确定", () => {
+  const pool = [
+    { address: "a", source: "cloudflare-official-v4" },
+    { address: "b", source: "cloudflare-official-v4" },
+    { address: "c", source: "edge-manual" },
+    { address: "d", source: "cloudflare-official-v4" },
+    { address: "e", source: "cloudflare-official-v4" },
+  ];
+  const scores = new Map([
+    ["d", { rtt: 40, colo: "HKG", samples: 3 }],
+    ["b", { rtt: 20, colo: "NRT", samples: 3 }],
+    ["a", { rtt: null, unreachable: true }],
+  ]);
+  const out = selectVerifiedNodesForTest(pool, scores, { minNodes: 4 });
+  assert.deepEqual(out.map((n) => n.address), ["b", "d", "c", "e"]);
+  assert.equal(out[0].userRtt, 20);
+  const strict = selectVerifiedNodesForTest(pool, scores, { minNodes: 0 });
+  assert.deepEqual(strict.map((n) => n.address), ["b", "d", "c"]);
+});
+
+test("selectVerifiedNodes: 全部判死时回退原列表", () => {
+  const pool = [{ address: "a" }];
+  const scores = new Map([["a", { unreachable: true }]]);
+  assert.equal(selectVerifiedNodesForTest(pool, scores, { minNodes: 0 }).length, 1);
+});

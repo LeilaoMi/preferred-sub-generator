@@ -43,6 +43,8 @@ jobs:
           VLESS_SNI: ${{ vars.VLESS_SNI }}
           VLESS_HOST: ${{ vars.VLESS_HOST }}
           VLESS_SECURITY: ${{ vars.VLESS_SECURITY }}
+          ALLOW_RELAY: ${{ vars.ALLOW_RELAY }}
+          EDGE_BLACKLIST: ${{ vars.EDGE_BLACKLIST }}
           UPDATE_WEBHOOK_URL: ${{ secrets.UPDATE_WEBHOOK_URL }}
           UPDATE_WEBHOOK_ALWAYS: ${{ vars.UPDATE_WEBHOOK_ALWAYS }}
           ALERT_REPEAT_HOURS: ${{ vars.ALERT_REPEAT_HOURS }}

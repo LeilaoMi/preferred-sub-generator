@@ -10,5 +10,18 @@
     "url": "https://www.cloudflare.com/ips-v6/",
     "type": "text",
     "cidrSamples": 16
+  },
+  {
+    "name": "cmliu-addressesapi",
+    "url": "https://raw.githubusercontent.com/cmliu/WorkerVless2sub/main/addressesapi.txt",
+    "type": "text",
+    "cfOnly": true
+  },
+  {
+    "name": "cmliu-addresses-csv",
+    "url": "https://raw.githubusercontent.com/cmliu/WorkerVless2sub/main/addressescsv.csv",
+    "type": "csv",
+    "minSpeed": 8,
+    "cfOnly": true
   }
 ]

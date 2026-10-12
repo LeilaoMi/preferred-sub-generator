@@ -173,3 +173,43 @@ export function withPreferredPort(node, portOrder) {
   const port = preferredPort(node, portOrder);
   return port == null ? node : { ...node, port };
 }
+
+// 国内视角稳定输出（2026-10-12，对齐 cmliu 的"固定名单"思路）：
+// 1. 国内本机实测 ok 的节点，按实测 RTT 升序——唯一真实信号；
+// 2. 手动置顶节点（sources/edge/manual.txt，你自己确认能用的 IP/域名）；
+// 3. 前两类不足 minNodes 时，才用过审池按固定顺序补齐（确定性，不随机）。
+// 每次拉取结果相同，edgetunnel 不会每次换一批没验证过的 IP。
+const DEFAULT_MIN_NODES = 10;
+const PINNED_SOURCES = new Set(["edge-manual", "pinned"]);
+
+export function readMinNodes(env = {}) {
+  const n = Number(env.SUB_MIN_NODES);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : DEFAULT_MIN_NODES;
+}
+
+export function selectVerifiedNodes(nodes, scores, { limit, minNodes, env = {}, rttDropMs } = {}) {
+  const list = Array.isArray(nodes) ? nodes : [];
+  const dropMs = rttDropMs ?? readRttDropMs(env);
+  const floor = minNodes ?? readMinNodes(env);
+  const cap = Number.isFinite(Number(limit)) && Number(limit) > 0 ? Number(limit) : list.length;
+
+  const isDead = (node) => scores?.get(node?.address)?.unreachable === true;
+  const measured = [];
+  const pinned = [];
+  const rest = [];
+  for (const node of list) {
+    if (isDead(node)) continue;
+    const score = scores?.get(node?.address);
+    if (isMeasuredOk(score, dropMs)) measured.push({ node, rtt: Number(score.rtt), score });
+    else if (PINNED_SOURCES.has(node?.source)) pinned.push(node);
+    else rest.push(node);
+  }
+  measured.sort((a, b) => a.rtt - b.rtt);
+
+  const verified = [...measured.map(({ node, score }) => decorateMeasured(node, score)), ...pinned];
+  const filler = verified.length < floor ? rest.slice(0, floor - verified.length) : [];
+  let result = [...verified, ...filler];
+  // 全部被判死时保留原列表，订阅不断流
+  if (result.length === 0) result = list.slice();
+  return result.slice(0, cap);
+}
