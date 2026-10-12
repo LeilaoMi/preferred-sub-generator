@@ -8,6 +8,17 @@
 
 > 隐私提醒：公开 `/sub` 等价于公开由真实 VLESS 模板派生出的完整订阅，包含 UUID、Host、SNI、path 等敏感参数。默认私密模式下，`/sub` 和 `/best` 需要只读 token；只有显式设置 `SUB_PUBLIC=1` 才会公开订阅。
 
+## 2026-10-12：国内视角稳定输出（对齐 cmliu 的固定名单思路）
+
+- **edgetunnel 探测和默认订阅不再随机抽样**，固定输出：国内本机实测 ok（按 RTT）→ `manual.txt` 手动置顶 → 不足 `SUB_MIN_NODES`（默认 10）时才用过审池按固定顺序补齐。每次拉取结果一致。`mode=sample` 仍可显式使用。
+- 只采信最近 `SUB_VERIFIED_DAYS`（默认 3）天的实测。
+- 手机 Termux 实测：见 [docs/termux.md](docs/termux.md)，`bash scripts/termux-probe.sh`（全量过审池、不测带宽、检测到走代理会中止）。
+- `probe-ips.js` 新增 `--pool`（全量实测，最多 300）、`--force`；回传自动分批。
+- 社区源已恢复（cmliu `addressesapi.txt` / CSV），默认 `cfOnly` 只保留 Cloudflare 官方段 IPv4。注意：cmliu 源基本全是 Oracle/AWS/Linode 反代 IP，`cfOnly` 下会被全部过滤；如接受反代，在 GitHub Actions Variables 设 `ALLOW_RELAY=1`。
+- `EDGE_BLACKLIST`（Actions Variable，逗号分隔 CIDR）可追加网段黑名单。
+- `manual.txt` 条目即使美国扫描不过审也保留在池里（`edgeVerified:false`）。
+- 修复：扫描时解析不出 HTTP 状态码的回包不再判为可用。
+
 ## 功能特性
 
 - 节点配置来自环境变量离散配置（VLESS_UUID / VLESS_SNI / VLESS_HOST / VLESS_PATH 等，对标竞品），项目内不保存任何模板；管理页只读展示当前配置并校验风险项（如 workers.dev SNI 在中国大陆被阻断）。

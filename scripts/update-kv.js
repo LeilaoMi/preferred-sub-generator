@@ -194,7 +194,7 @@ export async function buildUpdatePayload({
   const nodeHost = (nodeConfig?.host || nodeConfig?.sni || "").trim();
   const nodeSecurity = (nodeConfig?.security || "tls").trim() || "tls";
   if (!nodeHost) throw new Error("Missing node host: 请配置 VLESS_SNI / VLESS_HOST 环境变量");
-  const { candidates: allCandidates, sourceHealth } = await collectCandidatesWithHealth({ manualText, remoteSources, fetchImpl, maxSourceBytes });
+  const { candidates: allCandidates, sourceHealth } = await collectCandidatesWithHealth({ manualText, remoteSources, fetchImpl, maxSourceBytes, extraBlacklist: process.env.EDGE_BLACKLIST || "", allowRelay: process.env.ALLOW_RELAY === "1" });
   // P2-6: IPv6 单独分流，不进 check
   const v6Candidates = [];
   const candidates = [];
@@ -212,7 +212,18 @@ export async function buildUpdatePayload({
     requireCfRay,
     allowTcpOnly,
   });
-  const aggregated = aggregateCheckedResults(checked).slice(0, poolLimit);
+  const allAggregated = aggregateCheckedResults(checked);
+  const aggregated = allAggregated.slice(0, poolLimit);
+  // 手动置顶（manual.txt）是你在国内确认能用的 IP/域名：美国扫描机连不上也保留（标记未过审），
+  // 订阅时排在实测节点之后、补齐节点之前。
+  // 只补回"扫描没过审"的手动条目；过审但被池上限截掉的不补，保持上限语义
+  const aggregatedAddresses = new Set(allAggregated.map((item) => item.address));
+  for (const candidate of candidates) {
+    if (candidate.source !== "edge-manual" || aggregatedAddresses.has(candidate.address)) continue;
+    aggregatedAddresses.add(candidate.address);
+    const port = Number(candidate.port) || 443;
+    aggregated.push({ address: candidate.address, port, ports: [port], latency: null, speed: null, colo: "", edgeVerified: false, source: "edge-manual", jitter: null });
+  }
   // P1-8: 第二轮抖动采样——只对入池候选的优选端口测 3 次，不对全量候选 3 倍探测
   const jitterSamples = await checkCandidates(
     aggregated.map((item) => ({ address: item.address, port: item.port, source: item.source })),
@@ -251,7 +262,7 @@ export async function buildUpdatePayload({
     requireCfRay,
     allowTcpOnly,
     checked: checked.length,
-    speedtestLocation: "GitHub Actions (US)",
+    speedtestLocation: "GitHub Actions (US，仅初筛；排序以国内本机实测为准)",
     speedtestLocationNote: "colo/latency/speed 均为美国机房测速结果，国内实际接入节点地区以本地为准（CF Anycast 就近分配）",
     averageLatency: averageLatency(bestIps),
     averageLatencyNewScan: averageLatency(nextBestIps),

@@ -363,7 +363,7 @@ async function fetchRemoteSource(source, { fetchImpl, maxSourceBytes }) {
   }
 }
 
-export async function collectCandidatesWithHealth({ manualText = "", remoteSources = [], fetchImpl = fetch, maxSourceBytes = DEFAULT_MAX_SOURCE_BYTES } = {}) {
+export async function collectCandidatesWithHealth({ manualText = "", remoteSources = [], fetchImpl = fetch, maxSourceBytes = DEFAULT_MAX_SOURCE_BYTES, extraBlacklist = "", allowRelay = false } = {}) {
   const manualCandidates = parseText(manualText, "edge-manual");
   const candidates = [...manualCandidates];
   const sourceHealth = [{ name: "edge-manual", ok: true, status: 200, candidates: manualCandidates.length, ms: 0 }];
@@ -381,10 +381,61 @@ export async function collectCandidatesWithHealth({ manualText = "", remoteSourc
     }
   }
 
-  return { candidates: uniqueCandidates(candidates), sourceHealth };
+  // ALLOW_RELAY=1 时不过滤社区源里的反代/中转 IP（cmliu 源几乎全是 Oracle/AWS/Linode 等反代 IP）
+  const cfOnlySources = allowRelay ? new Set() : new Set(
+    remoteSources.filter((source) => typeof source === "object" && source.cfOnly).map((source) => getSourceName(source, source.url)),
+  );
+  const blacklist = [...DEFAULT_EDGE_BLACKLIST, ...String(extraBlacklist || "").split(",").map((item) => item.trim()).filter(Boolean)];
+  const { candidates: filtered, dropped } = filterEdgeCandidates(uniqueCandidates(candidates), { cfOnlySources, blacklist });
+  return { candidates: filtered, sourceHealth, dropped };
 }
 
 export async function collectCandidates(options = {}) {
   const result = await collectCandidatesWithHealth(options);
   return result.candidates;
+}
+
+// Cloudflare 官方 IPv4 段（https://www.cloudflare.com/ips-v4/，AS13335 入口）。
+// 社区源（cmliu 等）里混有 Oracle/腾讯云等中转 IP；source.cfOnly=true 时只保留落在这些段里的 IPv4，
+// 域名（优选域名）原样保留——它们靠国内 DNS 按运营商选线，最终也要经本机实测才会排前面。
+export const CLOUDFLARE_IPV4_RANGES = [
+  "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22",
+  "141.101.64.0/18", "108.162.192.0/18", "190.93.240.0/20", "188.114.96.0/20",
+  "197.234.240.0/22", "198.41.128.0/17", "162.158.0.0/15", "104.16.0.0/13",
+  "104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22",
+];
+
+// 网段黑名单默认为空，用环境变量 EDGE_BLACKLIST（逗号分隔 CIDR）按需追加，
+// 例如你在本机实测中发现整段不通时。
+export const DEFAULT_EDGE_BLACKLIST = [];
+
+function parseV4Cidr(cidr) {
+  const match = String(cidr).trim().match(/^(\d{1,3}(?:\.\d{1,3}){3})\/(\d{1,2})$/);
+  if (!match || !isIPv4(match[1])) return null;
+  const prefix = Number(match[2]);
+  const mask = prefix === 0 ? 0 : (0xffffffff << (32 - prefix)) >>> 0;
+  return { base: (ipv4ToNumber(match[1]) & mask) >>> 0, mask };
+}
+
+export function ipv4InRanges(address, ranges) {
+  if (!isIPv4(address)) return false;
+  const value = ipv4ToNumber(address);
+  return ranges.some((cidr) => {
+    const parsed = typeof cidr === "string" ? parseV4Cidr(cidr) : cidr;
+    return parsed && ((value & parsed.mask) >>> 0) === parsed.base;
+  });
+}
+
+export function filterEdgeCandidates(candidates, { cfOnlySources = new Set(), blacklist = DEFAULT_EDGE_BLACKLIST } = {}) {
+  const cfRanges = CLOUDFLARE_IPV4_RANGES.map(parseV4Cidr);
+  const black = blacklist.map(parseV4Cidr).filter(Boolean);
+  const dropped = { blacklisted: 0, notCloudflare: 0 };
+  const kept = candidates.filter((candidate) => {
+    const address = candidate?.address;
+    if (!isIPv4(address)) return true;
+    if (ipv4InRanges(address, black)) { dropped.blacklisted += 1; return false; }
+    if (cfOnlySources.has(candidate.source) && !ipv4InRanges(address, cfRanges)) { dropped.notCloudflare += 1; return false; }
+    return true;
+  });
+  return { candidates: kept, dropped };
 }

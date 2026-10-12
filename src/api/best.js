@@ -5,6 +5,8 @@ import { loadIpScores } from "./ip-feedback.js";
 import { filterNodesByColo, parseColoFilter, orderNodesByMeasurement } from "./node-filter.js";
 
 const MAX_NODES = 50;
+// rank=off 时允许拉整个过审池（上限 300），供国内本机 probe-ips.js --pool 全量实测
+const MAX_POOL_NODES = 300;
 
 export async function handleBest(request, env) {
   const auth = await requireReadAuth(request, env);
@@ -12,7 +14,8 @@ export async function handleBest(request, env) {
 
   const url = new URL(request.url);
   const requested = Number(url.searchParams.get("n") || 20);
-  const limit = Number.isFinite(requested) && requested > 0 ? Math.min(requested, MAX_NODES) : 20;
+  const maxNodes = url.searchParams.get("rank") === "off" ? MAX_POOL_NODES : MAX_NODES;
+  const limit = Number.isFinite(requested) && requested > 0 ? Math.min(requested, maxNodes) : 20;
   const version = url.searchParams.get("version") || "";
   const allNodes = await readBestIpsVersion(env.SUB_KV, version);
 

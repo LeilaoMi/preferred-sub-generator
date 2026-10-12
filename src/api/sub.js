@@ -8,11 +8,11 @@ import { formatEdgeNodeName } from "../utils/colo.js";
 import { loadIpScores } from "./ip-feedback.js";
 import { getNodeConfig, getNodeConfigFromUrl, nodeConfigToTemplate, validateNodeConfig } from "../config/nodes.js";
 import { readBestIps, readBestIpsV6 } from "./kv.js";
-import { filterNodesByColo, parseColoFilter, orderNodesByMeasurement, sampleNodes, withPreferredPort } from "./node-filter.js";
+import { filterNodesByColo, parseColoFilter, orderNodesByMeasurement, sampleNodes, selectVerifiedNodes, withPreferredPort } from "./node-filter.js";
 import { getPreferredPortOrder } from "../utils/ports.js";
 
 const MAX_NODES = 50;
-// 探测旁路给 edgetunnel 的数量：够轮换、够轻，16-30 是经验区间
+// 探测旁路给 edgetunnel 的节点上限
 const PROBE_MAX_NODES = 30;
 
 const EDGE_PROBE_UUID = "00000000-0000-4000-8000-000000000000";
@@ -125,27 +125,29 @@ export async function handleSub(request, env) {
   let nodes;
   let scores = null;
   nodes = await readBestIps(env.SUB_KV);
-  if (url.searchParams.get("rank") !== "off") {
-    ({ scores } = await loadIpScores(env));
-    if (!sampleMode) nodes = orderNodesByMeasurement(nodes, scores, { env });
+  const rankOff = url.searchParams.get("rank") === "off";
+  if (!rankOff) {
+    // 选节点只认最近 SUB_VERIFIED_DAYS 天（默认 3）的国内实测，太旧的实测不代表现在的线路
+    ({ scores } = await loadIpScores(env, { days: env.SUB_VERIFIED_DAYS || 3 }));
   }
-  // edgetunnel 探测旁路拼的 URL 不带 mode 参数，但它要的正是"每次来都换一批 IP"的效果，
-  // 所以探测直接走抽样（普通订阅不带 mode=sample 时仍维持旧的固定榜，可随时回滚）。
-  const probeSampling = edgeProbe || sampleMode;
   // P1-3: SUB_PREFERRED_PORTS 可覆盖端口顺序
   const portOrder = getPreferredPortOrder(env);
-  if (probeSampling) {
-    // 抽样模式：池内先按落点分桶，再加权随机抽（实测只加权、不排名）。
-    // 端口统一走 443 优先：从国内运营商实测看，非标准端口（2053/2083/2087 等）
-    // 建连超时的概率明显高于 443，端口分散反而拉低了整批节点的可用率；
-    // IP 层面的多样性（每次抽不同的 30 个 IP）已经足够做故障隔离。
-    nodes = sampleNodes(filterNodesByColo(nodes, colos).nodes, {
+  const colosFiltered = filterNodesByColo(nodes, colos).nodes;
+  if (sampleMode) {
+    // 显式 mode=sample 才随机抽样（可选玩法，不再是 edgetunnel 的默认行为）
+    nodes = sampleNodes(colosFiltered, {
       limit: getLimit(url, edgeProbe ? PROBE_MAX_NODES : MAX_NODES),
       scores,
       env,
     }).map((node) => withPreferredPort(node, portOrder));
+  } else if (rankOff) {
+    nodes = colosFiltered.slice(0, getLimit(url, MAX_NODES)).map((node) => withPreferredPort(node, portOrder));
   } else {
-    nodes = filterNodesByColo(nodes, colos).nodes.slice(0, getLimit(url, MAX_NODES));
+    // 默认（含 edgetunnel 探测）：固定输出 国内实测 ok > 手动置顶 > 过审池补齐，每次结果一致
+    nodes = selectVerifiedNodes(colosFiltered, scores, {
+      limit: getLimit(url, edgeProbe ? PROBE_MAX_NODES : MAX_NODES),
+      env,
+    }).map((node) => withPreferredPort(node, portOrder));
   }
   // P2-6: ?ip6=1 追加未实测 IPv6（不占 limit 名额、不进排名抽样；探测旁路不混入）
   if (!edgeProbe && url.searchParams.get("ip6") === "1") {

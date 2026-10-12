@@ -578,3 +578,37 @@ test("delete KV value calls Cloudflare API", async () => {
   assert.equal(captured.options.method, "DELETE");
   assert.equal(captured.options.headers.Authorization, "Bearer secret-token");
 });
+import { filterEdgeCandidates as filterEdgeCandidatesForTest } from "../scripts/lib/candidates.js";
+
+test("cfOnly 源只保留 Cloudflare 官方段 IPv4，域名保留，黑名单生效", () => {
+  const input = [
+    { address: "104.16.1.1", port: 443, source: "community" },
+    { address: "150.230.206.130", port: 443, source: "community" },
+    { address: "cf.example.com", port: 443, source: "community" },
+    { address: "150.230.206.131", port: 443, source: "edge-manual" },
+    { address: "172.64.9.9", port: 443, source: "edge-manual" },
+  ];
+  const { candidates, dropped } = filterEdgeCandidatesForTest(input, {
+    cfOnlySources: new Set(["community"]),
+    blacklist: ["172.64.9.0/24"],
+  });
+  assert.deepEqual(candidates.map((c) => c.address), ["104.16.1.1", "cf.example.com", "150.230.206.131"]);
+  assert.deepEqual(dropped, { blacklisted: 1, notCloudflare: 1 });
+});
+
+test("手动置顶条目扫描不过审也保留在池里", async () => {
+  const payload = await buildUpdatePayload({
+    nodeConfig: { sni: "example.com", host: "example.com", security: "tls" },
+    manualText: ["1.1.1.1", "9.9.9.9:2053"].join("\n"),
+    remoteSources: [],
+    checkOne: async (address) => (address === "1.1.1.1" ? { latency: 5, colo: "LAX", edgeVerified: true } : null),
+    downloadSpeedImpl: async () => null,
+    now: new Date("2026-10-12T00:00:00Z"),
+  });
+  const bestIps = JSON.parse(payload.BEST_IPS);
+  const pinned = bestIps.find((item) => item.address === "9.9.9.9");
+  assert.ok(pinned);
+  assert.equal(pinned.port, 2053);
+  assert.equal(pinned.edgeVerified, false);
+  assert.equal(pinned.source, "edge-manual");
+});

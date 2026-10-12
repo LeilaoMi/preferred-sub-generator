@@ -54,7 +54,8 @@ function parseStatusCode(buffer) {
 // 403 + error code（如 1034），这类响应同样带 cf-ray，不能仅凭 cf-ray 判定可用。
 function isZoneServingResponse(buffer) {
   const status = parseStatusCode(buffer);
-  if (status === 0) return true;
+  // 解析不出状态码（空回包、非 HTTP、被中间设备截断）一律判失败，不能当作可用
+  if (status === 0) return false;
   return status >= 200 && status < 300;
 }
 

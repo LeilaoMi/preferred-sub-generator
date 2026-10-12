@@ -268,9 +268,11 @@ test("edgetunnel probe uses KV pool (mode=cidr was removed)", async () => {
   assert.equal(response.status, 200);
   const decoded = Buffer.from(await response.text(), "base64").toString("utf8");
   const lines = decoded.split("\n").filter(Boolean);
-  // KV 池 40 个 → 探测采样上限 30 个；IP 来自测试池（10.0.0.x）
-  assert.equal(lines.length, 30);
-  assert.match(decoded, /10\.0\.0\./);
+  // 无国内实测、无手动置顶 → 只按固定顺序补齐 SUB_MIN_NODES（默认 10）个，不随机
+  assert.equal(lines.length, 10);
+  assert.match(lines[0], /@10\.0\.0\.1:443/);
+  const again = Buffer.from(await (await handleSub(probe, env)).text(), "base64").toString("utf8");
+  assert.equal(again, decoded, "两次探测结果必须一致");
 });
 
 test("sub rejects removed mode=cidr with a clear error", async () => {
