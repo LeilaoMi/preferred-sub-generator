@@ -34,12 +34,18 @@ jobs:
       - name: Validate manual sources
         run: npm run validate:sources
 
+      - name: 自动定位 KV 命名空间
+        run: node scripts/cf-bootstrap.js
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN_2 }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_NAMESPACE_ID: ${{ secrets.CLOUDFLARE_NAMESPACE_ID }}
+
       - name: Update Cloudflare KV
         run: node scripts/update-kv.js
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN_2 }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN_2 }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CLOUDFLARE_NAMESPACE_ID: ${{ secrets.CLOUDFLARE_NAMESPACE_ID }}
           VLESS_SNI: ${{ vars.VLESS_SNI }}
           VLESS_HOST: ${{ vars.VLESS_HOST }}
           VLESS_SECURITY: ${{ vars.VLESS_SECURITY }}
