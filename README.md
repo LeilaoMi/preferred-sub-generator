@@ -20,12 +20,12 @@
   - 可按需在 `sources/edge/remote.json` 自行添加 cmliu/amclubs 等社区源（注意区分 CF 边缘 IP 与中转 IP）。
 - 候选源并行抓取：多源同时拉取，单源 10 秒超时隔离，一个源挂掉不拖慢整轮刷新；每源健康状态记入 `SOURCE_HEALTH`。
 - CSV 源按表头解析：按列名（ip/端口/tls/速度/数据中心）定位，不再依赖固定列顺序；上游加列不再静默错位。
-- 自动检测候选 IP 的可达性、延迟、抖动和 Cloudflare COLO：每个候选测 3 次取延迟抖动（标准差），抖动大的节点在排序中被惩罚。
-- 扫描只做"资格审查"，不发榜：GitHub Actions 用 **VLESS_SNI** 当 SNI 逐个直连候选 IP，要求返回 2xx（含 cf-ray）才算过审；rtt 超过 1000ms（`SUB_RTT_DROP_MS` 可配）直接淘汰；过审结果按 IP 地址聚合为"过审池"写入 KV（单个 IP 记下全部过审端口，池上限 300）。官方网段每个 CIDR 抽 16 个样本。
-- 节点排序用多维加权评分公式：`score = (wS·带宽 + wC·落点加成 + 0.1) / (1 + wR·延迟 + wJ·抖动)`，各维度归一化，权重经 `SUB_SCORE_W_*` 环境变量可调；rtt 只做淘汰门槛，不再主导排名（美国扫描机的握手延迟不代表你的真实体验）。
-- 抽样模式（`mode=sample`）与固定榜共用同一评分公式做加权随机抽样。
-- 订阅有两种发法：默认是固定榜（历史行为）；`mode=sample` 是抽样模式——先按落点分桶，再从池里加权随机抽，每次拉取换一批，本地实测只提高被抽中权重、不再决定名次。
-- 抽样模式细节：节点端口优先 443；节点名不再印美国扫描机的延迟（有本地实测才标 `实测`）；Clash / Sing-box 输出附带自动测速组，客户端连接时自己挑活的。
+- 自动检测候选 IP 的可达性、延迟和 Cloudflare COLO：每个候选测 3 次，时通时断的直接淘汰。
+- 扫描只做"资格审查"，不发榜：GitHub Actions 用 **VLESS_SNI** 当 SNI 逐个直连候选 IP，要求返回 2xx（含 cf-ray）才算过审；过审结果按 IP 地址聚合为"过审池"写入 KV（单个 IP 记下全部过审端口，池上限 300）。
+- 节点排序只用你本机的实测：实测 ok 的按实测 RTT 升序排前面；没实测过的只保证 6 小时内验证活着，不排名。美国扫描机的延迟不再参与排序——那是 demo 数据。
+- 抽样模式（`mode=sample`）：每次从过审池里加权随机抽，有本地实测的被抽中概率 ×3。
+- 订阅有两种发法：默认是确定性排序（实测优先）；`mode=sample` 是抽样模式，每次拉取换一批。
+- 抽样模式细节：节点端口优先 443；节点名不印延迟（有本地实测才标 `实测`）。
 - edgetunnel 探测旁路每次从池里抽样 **30** 个 IP 发出去（edgetunnel 每次生成订阅都会来拉，天然轮换），端口走 443 优先（该 IP 过审端口含 443 就发 443；国内运营商对 2053/2083 等非标准端口建连超时的概率明显高于 443）。
 - 提供浏览器本地测速反馈面板：首页「开始测速」按钮在用户浏览器本地通过 Cloudflare 官方端点 `speed.cloudflare.com/__down` 实测下载速度，结果回传 `/api/speedtest-feedback` 存入 D1（未绑定时回退 KV），可用于验证国内真实访问质量；`/admin.html` 提供按天趋势面板。
 - `/status` 标注测速地点（`speedtestLocation`，当前为 `GitHub Actions (US)`）、平均延迟（`averageLatency`）和平均带宽（`averageSpeed`；每 6 小时对 Top 30 过审节点主动抽测带宽，结果写入 KV）。
@@ -270,11 +270,7 @@ SOURCE_MAX_BYTES=5242880  远程候选源最大读取字节数，默认 5MB
 REQUIRE_CF_RAY=1          只保留带 cf-ray 的 Cloudflare Edge 验证结果，默认开启
 ALLOW_TCP_ONLY=1          兼容 TCP 可达但无 cf-ray 的结果，默认关闭
 VERSION_RETENTION=30      BEST_IPS_* 版本快照保留数量，默认 30
-SUB_SCORE_W_SPEED=1.0     评分公式带宽权重
-SUB_SCORE_W_COLO=0.5      评分公式落点加成权重（用户实测出 colo 的节点加分）
-SUB_SCORE_W_RTT=2.0       评分公式延迟惩罚权重
-SUB_SCORE_W_JITTER=1.0    评分公式抖动惩罚权重
-SUB_RTT_DROP_MS=1000      rtt 超过该值直接淘汰（毫秒），默认 1000
+SUB_RTT_DROP_MS=1000      实测 rtt 超过该值（毫秒）不进实测池，默认 1000
 SUB_PREFERRED_PORTS=      覆盖端口优先级顺序，如 "443,8443,2053"；留空保持 443 优先
 SUB_TOKEN_ROTATE_DAYS=    只读 token 自动周期轮换天数，如 7；留空则关闭（默认关闭）
 ```
@@ -481,26 +477,25 @@ GET /sub?type=v2rayng
 GET /sub?type=clash
 GET /sub?type=singbox
 GET /sub?type=shadowrocket
-GET /sub?type=v2rayng&template=1
-GET /sub?type=v2rayng&slot=1&wrap=76
+GET /sub?type=v2rayng&wrap=76
 ```
 
 可选参数：
 
 ```text
 n=20        限制返回节点数量，最多 50
-template=1  使用 TEMPLATE_1 模板槽位，支持 1-5
-slot=1      使用 TEMPLATE_1 模板槽位，template 的别名
 wrap=76     v2rayNG/base64 输出按固定宽度换行，兼容老客户端/复制场景
 colo=HKG    只保留该线路节点，逗号分隔多个；auto = 你的接入点；无匹配回退全量
-rank=off    关闭按本地实测数据重排（默认开启）
-mode=sample 抽样模式：不发固定榜，从过审池里按落点分桶后加权随机抽（见下）
+rank=off    关闭按本地实测数据排序（默认开启）
+mode=sample 抽样模式：每次从过审池里加权随机抽 n 个（见下）
 ip6=1       在常规节点之后追加 IPv6 独立池节点（带 [IPv6] 前缀，不占 n 名额）
 ```
 
 `type` 缺省时按请求 UA 自动识别：Clash/Mihomo/ClashMeta → clash，Sing-box → singbox，Surge → clash，Shadowrocket → shadowrocket，v2rayNG → v2rayng；识别不出回退 vless。显式 `?type=` 始终优先。响应带 `Subscription-Userinfo` 头，客户端订阅页可正常显示。
 
-抽样模式（`mode=sample`）与默认发榜的区别：KV 里存的是检查过审的整个 IP 池（按地址聚合，含各 IP 通过的端口列表）。带 `mode=sample` 拉订阅时，每次请求从池里随机抽 `n` 个发，本地实测只提高被抽中的权重、不再决定名次；节点端口优先 443；节点名不再印 GitHub 机房测出的延迟（有本地实测才标 `实测`）；Clash / Sing-box 输出会附带自动测速分组，客户端连接时自己挑活的。去掉这个参数即回退旧的固定榜订阅，便于 A/B 和回滚。
+抽样模式（`mode=sample`）与默认的区别：KV 里存的是检查过审的整个 IP 池。带 `mode=sample` 拉订阅时，每次请求从池里加权随机抽 `n` 个发——有你本地实测的 IP 被抽中概率 ×3，没测过的 ×1；节点端口优先 443；节点名不印延迟（有本地实测才标 `实测`）。去掉这个参数即回退默认的确定性排序。
+
+排序原则（2026-10-12 重设计）：**只有你本机的实测才是真实信号**。默认订阅 = 实测 ok 的节点按实测 RTT 升序排前面，没实测过的按池顺序跟在后面（只保证 6 小时内验证活着，不假装知道快慢）。美国扫描机的延迟/抖动不再参与排序——那是 demo 数据。Clash / Sing-box 输出默认带自动测速分组（`自动测速` url-test），客户端在你线路上自己挑最快的。
 
 特殊：edgetunnel 探测旁路。当请求同时满足 `host=example.com` + `uuid=00000000-0000-4000-8000-000000000000` + UA 含 `edgetunnel` 时，`/sub` 免只读 token 放行，固定返回 base64 编码的占位订阅（占位 uuid/host，不泄露真实参数），用于对接 cmliu 版 edgetunnel 的 `sub://` 协议。探测不走固定榜：每次从过审池里加权随机抽一批 IP 发出去（edgetunnel 每次生成订阅都会来拉一次，天然轮换），端口走 443 优先（国内运营商对非标准端口更易超时），名称不带美国测速延迟。详见「与 edgetunnel 配合」。
 
@@ -582,7 +577,7 @@ GET  /api/ip-feedback
 
 `GET` 需要管理 token，`?days=N`（默认 14、上限 90）返回按 IP 聚合的分数（`rtt` 平均值、`speed` 平均值、最新 `colo`、样本数、`failed` 失败次数、`unreachable` 是否判定不可用）。
 
-`/sub` 与 `/best` 读取最近窗口内的实测数据：默认按实测 RTT 升序重排节点（实测过的排前面，未实测的按原顺序跟在后面），`rank=off` 可关闭；`/sub?mode=sample` 下则改为加权随机抽样，实测好的 IP 更容易被抽中、不再垄断排序。被判定为 `unreachable`（失败次数多于成功次数）的 IP 会被直接剔除，`/best` 响应里的 `droppedUnreachable` 就是剔除数量；如果剔完一个不剩，自动回退全量，订阅不会变空。数据全空时行为与旧版完全一致。
+`/sub` 与 `/best` 读取最近窗口内的实测数据：默认按实测 RTT 升序排序（实测过的排前面，未实测的按原顺序跟在后面），`rank=off` 可关闭；`/sub?mode=sample` 下则改为加权随机抽样（实测好的 IP 被抽中概率 ×3）。被判定为 `unreachable`（失败次数多于成功次数）的 IP 会被直接剔除，`/best` 响应里的 `droppedUnreachable` 就是剔除数量；如果剔完一个不剩，自动回退全量，订阅不会变空。数据全空时行为与旧版完全一致。
 
 ### 模板配置
 

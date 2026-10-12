@@ -84,3 +84,15 @@ test("getNodeConfigFromUrl: 无 uuid 返回 null 走兜底", async () => {
   const url = new URL("https://example.com/sub?type=vless");
   assert.equal(getNodeConfigFromUrl(url), null);
 });
+
+test("getNodeConfigFromUrl: type=订阅格式名不污染节点网络类型", async () => {
+  const { getNodeConfigFromUrl } = await import("../src/config/nodes.js");
+  // ?type=clash 是订阅格式，节点网络类型应回退 ws，不能变成 clash
+  const clash = getNodeConfigFromUrl(new URL("https://example.com/sub?uuid=22222222-2222-4222-8222-222222222222&type=clash"));
+  assert.equal(clash.type, "ws");
+  const v2rayng = getNodeConfigFromUrl(new URL("https://example.com/sub?uuid=22222222-2222-4222-8222-222222222222&type=v2rayng"));
+  assert.equal(v2rayng.type, "ws");
+  // 真正的网络类型不受影响
+  const grpc = getNodeConfigFromUrl(new URL("https://example.com/sub?uuid=22222222-2222-4222-8222-222222222222&type=grpc"));
+  assert.equal(grpc.type, "grpc");
+});

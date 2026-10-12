@@ -19,18 +19,26 @@ export const RISKY_SNI_PATTERNS = [
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** 订阅格式名（vless/v2rayng/clash/...）与 VLESS 网络类型（ws/tcp/grpc）共用 `type` 参数名。
+ *  2026-10-12 修复：当 `type` 的值是订阅格式名时，它属于订阅格式，不属于节点配置，
+ *  节点网络类型回退默认值 ws，避免生成 `vless://...?type=v2rayng` 这种坏链接。 */
+const SUBSCRIPTION_FORMAT_NAMES = new Set([
+  "vless", "v2rayng", "base64", "clash", "mihomo", "singbox", "sing-box", "shadowrocket",
+]);
+
 /** 从 URL 查询参数读取节点配置（无状态，对标其他订阅器做法） */
 export function getNodeConfigFromUrl(url) {
   const params = url.searchParams;
   const uuid = (params.get("uuid") || "").trim();
   if (!uuid) return null; // 没有 uuid 参数，走环境变量兜底
+  const rawType = (params.get("type") || "").trim().toLowerCase();
   return {
     uuid,
     sni: (params.get("sni") || "").trim(),
     host: (params.get("host") || "").trim(),
     path: (params.get("path") || "").trim(),
     port: Number(params.get("port")) || 443,
-    type: (params.get("type") || "ws").trim() || "ws",
+    type: SUBSCRIPTION_FORMAT_NAMES.has(rawType) ? "ws" : (rawType || "ws"),
     security: (params.get("security") || "tls").trim() || "tls",
   };
 }
