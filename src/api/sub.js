@@ -11,7 +11,7 @@ import { applyHostRotation, readHostHealth, rotationEnabled } from "./host-healt
 import { getNodeConfig, getNodeConfigFromUrl, nodeConfigToTemplate, validateNodeConfig } from "../config/nodes.js";
 import { readBestIps, readBestIpsV6, readPendingCnIps } from "./kv.js";
 import { filterNodesByColo, isMeasuredOk, parseColoFilter, readMinNodes, readRttDropMs, sampleNodes, selectVerifiedNodes, withPreferredPort } from "./node-filter.js";
-import { getPreferredPortOrder } from "../utils/ports.js";
+import { getPreferredPortOrder, NON_TLS_PORTS } from "../utils/ports.js";
 
 const MAX_NODES = 50;
 // 探测旁路给 edgetunnel 的节点上限
@@ -186,6 +186,8 @@ export async function handleSub(request, env) {
       env,
     }).map((node) => withPreferredPort(node, portOrder));
   }
+  // 2026-10-13：TLS 订阅里去掉 80/8080 等非 TLS 端口的节点（反代源偶尔只给 :80，配 TLS 必然握不上手）
+  nodes = dropTlsPortMismatch(nodes, template);
   // P2-6: ?ip6=1 追加未实测 IPv6（不占 limit 名额、不进排名抽样；探测旁路不混入）
   if (!edgeProbe && url.searchParams.get("ip6") === "1") {
     const v6Nodes = await readBestIpsV6(env.SUB_KV);
@@ -231,4 +233,10 @@ export async function handleSub(request, env) {
   }
 
   return jsonResponse(errorPayload("UNSUPPORTED_SUBSCRIPTION_TYPE", "Unsupported subscription type"), 400);
+}
+
+export function dropTlsPortMismatch(nodes, template) {
+  if (String(template?.security || "tls") !== "tls") return nodes;
+  const bad = new Set(NON_TLS_PORTS);
+  return nodes.filter((node) => !bad.has(Number(node?.port)));
 }

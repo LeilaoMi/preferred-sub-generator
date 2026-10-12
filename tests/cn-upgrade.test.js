@@ -338,3 +338,10 @@ test("实例配置只对同名仓库生效，复刻不继承", async () => {
   assert.deepEqual(resolveInstanceConfig(config, "fork/b"), {});
   assert.deepEqual(resolveInstanceConfig(config, undefined), {});
 });
+
+test("TLS 订阅去掉 :80 等非 TLS 端口节点", async () => {
+  const { dropTlsPortMismatch } = await import("../src/api/sub.js");
+  const nodes = [{ address: "1.1.1.1", port: 80 }, { address: "1.0.0.1", port: 443 }, { address: "1.0.0.2", port: 8880 }];
+  assert.deepEqual(dropTlsPortMismatch(nodes, { security: "tls" }).map((n) => n.address), ["1.0.0.1"]);
+  assert.equal(dropTlsPortMismatch(nodes, { security: "none" }).length, 3);
+});
