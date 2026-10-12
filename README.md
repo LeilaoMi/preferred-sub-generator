@@ -14,7 +14,7 @@
 - 只采信最近 `SUB_VERIFIED_DAYS`（默认 3）天的实测。
 - 手机 Termux 实测：见 [docs/termux.md](docs/termux.md)，`bash scripts/termux-probe.sh`（全量过审池、不测带宽、检测到走代理会中止）。
 - `probe-ips.js` 新增 `--pool`（全量实测，最多 300）、`--force`；回传自动分批。
-- 社区源已恢复（cmliu `addressesapi.txt` / CSV），默认 `cfOnly` 只保留 Cloudflare 官方段 IPv4。注意：cmliu 源基本全是 Oracle/AWS/Linode 反代 IP，`cfOnly` 下会被全部过滤；如接受反代，在 GitHub Actions Variables 设 `ALLOW_RELAY=1`。
+- **稳定优先，放行反代 IP**：恢复 cmliu 社区源（`addressesapi.txt` / CSV）。这些源基本是 Oracle/AWS/Linode 上的反代 IP，正是 cmliu 在国内稳定的原因，默认放行。流量内容仍是 TLS 端到端加密，但反代方可见连接元数据、可随时失效；介意的话在 GitHub Actions Variables 设 `ALLOW_RELAY=0`，只保留 Cloudflare 官方段 IPv4。
 - `EDGE_BLACKLIST`（Actions Variable，逗号分隔 CIDR）可追加网段黑名单。
 - `manual.txt` 条目即使美国扫描不过审也保留在池里（`edgeVerified:false`）。
 - 修复：扫描时解析不出 HTTP 状态码的回包不再判为可用。
@@ -882,3 +882,7 @@ docs/source-research.md
 ## 免责声明
 
 本项目仅用于个人学习和私用订阅管理。请遵守当地法律法规。不要把真实节点提交到不可信的公开订阅器。
+
+## 致敬
+
+本项目的节点筛选与输出思路——国内实测、固定名单、反代 IP 兜底稳定性——直接受 [cmliu](https://github.com/cmliu) 的 [edgetunnel](https://github.com/cmliu/edgetunnel) 与 [WorkerVless2sub](https://github.com/cmliu/WorkerVless2sub) 启发，社区优选源也来自 cmliu 及其贡献者的长期维护。感谢 cmliu 和所有为 Cloudflare 优选 IP 生态贡献测速数据的朋友。

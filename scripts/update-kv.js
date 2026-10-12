@@ -194,7 +194,7 @@ export async function buildUpdatePayload({
   const nodeHost = (nodeConfig?.host || nodeConfig?.sni || "").trim();
   const nodeSecurity = (nodeConfig?.security || "tls").trim() || "tls";
   if (!nodeHost) throw new Error("Missing node host: 请配置 VLESS_SNI / VLESS_HOST 环境变量");
-  const { candidates: allCandidates, sourceHealth } = await collectCandidatesWithHealth({ manualText, remoteSources, fetchImpl, maxSourceBytes, extraBlacklist: process.env.EDGE_BLACKLIST || "", allowRelay: process.env.ALLOW_RELAY === "1" });
+  const { candidates: allCandidates, sourceHealth } = await collectCandidatesWithHealth({ manualText, remoteSources, fetchImpl, maxSourceBytes, extraBlacklist: process.env.EDGE_BLACKLIST || "", allowRelay: process.env.ALLOW_RELAY !== "0" });
   // P2-6: IPv6 单独分流，不进 check
   const v6Candidates = [];
   const candidates = [];

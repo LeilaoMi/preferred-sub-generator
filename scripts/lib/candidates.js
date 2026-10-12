@@ -363,7 +363,7 @@ async function fetchRemoteSource(source, { fetchImpl, maxSourceBytes }) {
   }
 }
 
-export async function collectCandidatesWithHealth({ manualText = "", remoteSources = [], fetchImpl = fetch, maxSourceBytes = DEFAULT_MAX_SOURCE_BYTES, extraBlacklist = "", allowRelay = false } = {}) {
+export async function collectCandidatesWithHealth({ manualText = "", remoteSources = [], fetchImpl = fetch, maxSourceBytes = DEFAULT_MAX_SOURCE_BYTES, extraBlacklist = "", allowRelay = true } = {}) {
   const manualCandidates = parseText(manualText, "edge-manual");
   const candidates = [...manualCandidates];
   const sourceHealth = [{ name: "edge-manual", ok: true, status: 200, candidates: manualCandidates.length, ms: 0 }];
@@ -381,7 +381,8 @@ export async function collectCandidatesWithHealth({ manualText = "", remoteSourc
     }
   }
 
-  // ALLOW_RELAY=1 时不过滤社区源里的反代/中转 IP（cmliu 源几乎全是 Oracle/AWS/Linode 等反代 IP）
+  // 稳定优先：默认放行社区源里的反代 IP（cmliu 源几乎全是 Oracle/AWS/Linode 等反代 IP，
+  // 这正是它在国内稳定的原因）。ALLOW_RELAY=0 时只保留 Cloudflare 官方段 IPv4。
   const cfOnlySources = allowRelay ? new Set() : new Set(
     remoteSources.filter((source) => typeof source === "object" && source.cfOnly).map((source) => getSourceName(source, source.url)),
   );
