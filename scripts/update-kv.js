@@ -1,3 +1,4 @@
+import { applyInstanceConfig } from "./lib/instance-config.js";
 import fs from "node:fs/promises";
 import { formatEdgeNodeName } from "../src/utils/colo.js";
 import { getPortsForSecurity } from "../src/utils/ports.js";
@@ -500,6 +501,7 @@ export async function reportRunFailure(error) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
+  applyInstanceConfig();
   // 兜底：main 若因某个永不 resolve 的 promise 挂起，进程会静默 exit 0 而不写 KV；这里改为报错退出
   process.on("beforeExit", (code) => {
     if (!globalThis.__updateKvDone && code === 0) {

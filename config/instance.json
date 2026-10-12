@@ -1,0 +1,8 @@
+{
+  "_说明": "按仓库区分的实例配置。只有 GITHUB_REPOSITORY 与键名完全一致时才生效，复刻的仓库不会继承这里的值。生效时覆盖同名 Actions 变量，手机网页直接编辑本文件即可。",
+  "LeilaoMi/preferred-sub-generator": {
+    "CHECK_HOSTS": "1.leilaomi.ccwu.cc,2.leilaomi.ccwu.cc,3.leilaomi.ccwu.cc,4.leilaomi.ccwu.cc,5.leilaomi.ccwu.cc,6.leilaomi.ccwu.cc,7.leilaomi.ccwu.cc,8.leilaomi.ccwu.cc,9.leilaomi.ccwu.cc,10.leilaomi.ccwu.cc",
+    "SUB_DEFAULT_ISP": "CU",
+    "VLESS_HOST": "1.leilaomi.ccwu.cc"
+  }
+}
