@@ -330,3 +330,11 @@ test("探针自身超时不计入；pages.dev 兜底时不做组合测", async (
   await runHostCheck({ kv: { accountId: "a", namespaceId: "n", apiToken: "t" }, env: { PAGES_PROJECT: "p" }, fetchImpl, comboTop: 5, pollMs: 1 });
   assert.deepEqual(posted.map((p) => p.target), ["p.pages.dev"]);
 });
+
+test("实例配置只对同名仓库生效，复刻不继承", async () => {
+  const { resolveInstanceConfig } = await import("../scripts/lib/instance-config.js");
+  const config = { "a/b": { CHECK_HOSTS: "x.com", SECRET: "no", SUB_DEFAULT_ISP: "CU" } };
+  assert.deepEqual(resolveInstanceConfig(config, "a/b"), { CHECK_HOSTS: "x.com", SUB_DEFAULT_ISP: "CU" });
+  assert.deepEqual(resolveInstanceConfig(config, "fork/b"), {});
+  assert.deepEqual(resolveInstanceConfig(config, undefined), {});
+});

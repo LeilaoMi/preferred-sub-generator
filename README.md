@@ -49,6 +49,8 @@
 | 社区实测池 | 把你的国内已验证 IP（只有 IP / 延迟 / 机房，不含域名和 UUID）公开在 `/cn-verified`；新复刻的人填别人的地址，开箱就有国内数据 | 分享方：变量 `PUBLIC_CN_VERIFIED=1`；使用方：变量 `COMMUNITY_POOL_URL=https://别人的域名/cn-verified`。社区数据永远排在自己的实测之后，而且会先拿去自己的探针复测 |
 | 手机告警 | 域名被墙、某网已验证节点 < 10、刷新失败时推送；同样内容 24 小时只推一次，恢复也推 | Secrets：`TG_BOT_TOKEN` + `TG_CHAT_ID`（Telegram），或 `BARK_URL`（如 `https://api.day.app/你的key`），或原有的 `UPDATE_WEBHOOK_URL` |
 
+不方便在 GitHub 设置页填变量时，也可以直接编辑 `config/instance.json`：只对键名与仓库名（如 `LeilaoMi/preferred-sub-generator`）一致的仓库生效，复刻的仓库不会继承；生效时覆盖同名 Actions 变量。
+
 `/status` 新增 `cnHosts`（每个域名在三网的 `ok / unstable / blocked`）和 `cnProbe.verified`（三网各有多少已验证节点）。
 
 **实测发现（2026-10-13）**：
