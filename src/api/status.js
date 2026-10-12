@@ -12,6 +12,16 @@ function ageMs(updatedAt, now) {
 
 export async function handleStatus(request, env) {
   const status = await readStatus(env.SUB_KV);
+  let cnProbe = null;
+  try {
+    const raw = await env.SUB_KV?.get?.("CN_PROBE_STATE");
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      cnProbe = { lastRunAt: parsed.lastRunAt || null, tested: parsed.tested ?? null, results: parsed.results ?? null, ok: parsed.ok ?? null, rateLimited: Boolean(parsed.rateLimited) };
+    }
+  } catch {
+    cnProbe = null;
+  }
   const fallbackActive = Boolean(status.protectedByPrevious);
   const lastError = status.lastError || null;
   const now = Date.parse(env.STATUS_NOW || "") || Date.now();
@@ -36,5 +46,7 @@ export async function handleStatus(request, env) {
     averageSpeed: status.averageSpeed ?? null,
     averageLatency: status.averageLatency ?? null,
     status: semanticStatus,
+    // 国内三网自动实测（china-probe.yml）最近一轮概况
+    cnProbe,
   });
 }
