@@ -164,7 +164,7 @@ test("sub sample mode applies to singbox with urltest outbound", async () => {
 
 test("edgetunnel probe prefers 443 on sampled nodes", async () => {
   const probe = new Request(
-    "https://example.com/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000",
+    "https://example.com/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000&mode=sample",
     { headers: { "User-Agent": "Mozilla/5.0 (compatible) edgetunnel/2.3.1" } },
   );
 
@@ -216,13 +216,41 @@ test("edgetunnel probe caps sampled nodes at 30", async () => {
     SUB_KV: { async get(key) { return data.get(key) || null; }, put(key, value) { data.set(key, value); } },
   };
   const probe = new Request(
-    "https://example.com/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000",
+    "https://example.com/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000&mode=sample",
     { headers: { "User-Agent": "edgetunnel/2.3.1" } },
   );
 
   const response = await handleSub(probe, env);
   const decoded = Buffer.from(await response.text(), "base64").toString("utf8");
   assert.equal(decoded.split("\n").filter(Boolean).length, 30);
+});
+
+test("edgetunnel probe defaults to cidr sampling without mode param", async () => {
+  const env = {
+    SUB_TOKEN: "test-token",
+    SUB_READ_TOKEN: "test-read-token",
+    VLESS_UUID: "11111111-1111-4111-8111-111111111111",
+    VLESS_SNI: "example.com",
+    VLESS_HOST: "example.com",
+    VLESS_PATH: "/ws",
+    VLESS_PORT: "443",
+    VLESS_TYPE: "ws",
+    VLESS_SECURITY: "tls",
+    SUB_PUBLIC: "0",
+    SUB_KV: { async get() { return null; }, put() {} },
+  };
+  // 不带 mode 参数的探测：edgetunnel 解析 sub:// 时不透传 mode，服务端默认走 CIDR
+  const probe = new Request(
+    "https://example.com/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000",
+    { headers: { "User-Agent": "edgetunnel/2.3.1" } },
+  );
+  const response = await handleSub(probe, env);
+  assert.equal(response.status, 200);
+  const decoded = Buffer.from(await response.text(), "base64").toString("utf8");
+  const lines = decoded.split("\n").filter(Boolean);
+  // CIDR 默认 16 个，不读 KV 也能出节点；节点名不带"实测"（无 KV 评分数据）
+  assert.equal(lines.length, 16);
+  assert.doesNotMatch(decoded, /实测/);
 });
 
 test("sub sample mode rotates subsets across requests", async () => {

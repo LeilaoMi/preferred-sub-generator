@@ -123,7 +123,9 @@ export async function handleSub(request, env) {
   // mode=cidr：cmliu 式运营商分段采样 —— 不读 KV 池、不排名，
   // 按请求运营商在 CIDR 段内随机采样，排序丢给客户端 url-test。
   // 漂移用采样多样性消化，不用精确测量解决。
-  const cidrMode = url.searchParams.get("mode") === "cidr";
+  // edgetunnel 探测默认走 CIDR（它解析 sub:// 时不透传 mode 参数，只能服务端默认）。
+  const explicitMode = url.searchParams.get("mode");
+  const cidrMode = explicitMode === "cidr" || (edgeProbe && explicitMode !== "sample" && explicitMode !== "rank");
   let nodes;
   let scores = null;
   let carrier = null;
