@@ -162,7 +162,54 @@ export async function loadIpEntries(env, { days, now = Date.now() } = {}) {
   return { entries, storage: "kv" };
 }
 
-export function summarizeIpScores(entries) {
+// 晚高峰（北京时间 20:00-23:00）是国内线路最差的时候，这段时间的实测更能说明问题
+const PEAK_START_HOUR = 20;
+const PEAK_END_HOUR = 23;
+const DEFAULT_PEAK_WEIGHT = 1.5;
+// 实测按时间衰减：半衰期 24 小时，旧结果仍有分量但不再主导，排序不会被单次抖动带跑
+const DEFAULT_HALF_LIFE_HOURS = 24;
+// 落地机房离国内太远（欧洲、美东等）时排序加罚，延迟低不等于线路好
+const NEAR_COLOS = new Set(["HKG", "TPE", "NRT", "HND", "KIX", "ICN", "SIN", "KUL", "BKK", "MNL", "LAX", "SJC", "SFO", "SEA"]);
+const FAR_COLO_PENALTY_MS = 80;
+const RTT_BUCKET_MS = 20;
+
+export function isPeakHour(at) {
+  const ts = Date.parse(at || "");
+  if (!Number.isFinite(ts)) return false;
+  const hour = (new Date(ts).getUTCHours() + 8) % 24;
+  return hour >= PEAK_START_HOUR && hour < PEAK_END_HOUR;
+}
+
+export function entryWeight(item, { now, halfLifeHours = DEFAULT_HALF_LIFE_HOURS, peakWeight = DEFAULT_PEAK_WEIGHT } = {}) {
+  let weight = 1;
+  const ts = Date.parse(item?.at || "");
+  if (Number.isFinite(now) && Number.isFinite(ts) && halfLifeHours > 0) {
+    const ageHours = Math.max(0, now - ts) / 3600000;
+    weight *= Math.pow(0.5, ageHours / halfLifeHours);
+  }
+  if (isPeakHour(item?.at)) weight *= peakWeight;
+  return weight;
+}
+
+// 排序分（越小越好）：RTT 按 20ms 分桶（小抖动不换位）+ 远端机房加罚 + 失败率加罚
+export function stableRank(score) {
+  if (score?.rtt === null || score?.rtt === undefined) return Infinity;
+  const rtt = Number(score.rtt);
+  if (!Number.isFinite(rtt)) return Infinity;
+  const bucket = Math.round(rtt / RTT_BUCKET_MS) * RTT_BUCKET_MS;
+  const colo = String(score?.colo || "").toUpperCase();
+  const coloPenalty = colo && !NEAR_COLOS.has(colo) ? FAR_COLO_PENALTY_MS : 0;
+  const rate = Number(score?.successRate);
+  const failPenalty = Number.isFinite(rate) ? Math.round((1 - rate) * 200) : 0;
+  return bucket + coloPenalty + failPenalty;
+}
+
+export function isFarColo(colo) {
+  const code = String(colo || "").toUpperCase();
+  return Boolean(code) && !NEAR_COLOS.has(code);
+}
+
+export function summarizeIpScores(entries, options = {}) {
   const byAddress = new Map();
 
   for (const item of Array.isArray(entries) ? entries : []) {
@@ -176,17 +223,28 @@ export function summarizeIpScores(entries) {
 
     let bucket = byAddress.get(address);
     if (!bucket) {
-      bucket = { rtt: 0, speed: 0, speedSamples: 0, samples: 0, failed: 0, colo: "", region: "", latest: "" };
+      bucket = { rtt: 0, rttWeight: 0, speed: 0, speedSamples: 0, samples: 0, failed: 0, wOk: 0, wFail: 0, colo: "", coloAt: "", region: "", latest: "" };
       byAddress.set(address, bucket);
+    }
+    const weight = entryWeight(item, options);
+    const at = String(item?.at || "");
+    // 落地机房只有 HTTPS 组合测/手机实测才拿得到，取最新一条有机房的记录
+    const colo = String(item?.colo || "").toUpperCase();
+    if (colo && at >= bucket.coloAt) {
+      bucket.colo = colo;
+      bucket.coloAt = at;
     }
 
     if (failed) {
       bucket.failed += 1;
+      bucket.wFail += weight;
       continue;
     }
 
     bucket.samples += 1;
-    bucket.rtt += rtt;
+    bucket.wOk += weight;
+    bucket.rtt += rtt * weight;
+    bucket.rttWeight += weight;
 
     const speed = Number(item?.speed);
     if (Number.isFinite(speed)) {
@@ -194,29 +252,47 @@ export function summarizeIpScores(entries) {
       bucket.speedSamples += 1;
     }
 
-    const at = String(item?.at || "");
     if (at > bucket.latest) {
       bucket.latest = at;
-      bucket.colo = String(item?.colo || "").toUpperCase();
       bucket.region = String(item?.region || "");
     }
   }
 
   const scores = new Map();
   for (const [address, bucket] of byAddress) {
-    scores.set(address, {
-      rtt: bucket.samples > 0 ? bucket.rtt / bucket.samples : null,
+    const total = bucket.wOk + bucket.wFail;
+    const score = {
+      rtt: bucket.rttWeight > 0 ? Math.round((bucket.rtt / bucket.rttWeight) * 100) / 100 : null,
       speed: bucket.speedSamples > 0 ? bucket.speed / bucket.speedSamples : null,
       colo: bucket.colo || undefined,
       region: bucket.region || undefined,
       samples: bucket.samples,
       failed: bucket.failed,
-      // 实测失败次数多于成功次数时判定为不可用，订阅里直接剔除
-      unreachable: bucket.failed > bucket.samples,
+      successRate: total > 0 ? Math.round((bucket.wOk / total) * 1000) / 1000 : null,
+      // 加权后失败多于成功时判定为不可用，订阅里直接剔除
+      unreachable: bucket.wFail > bucket.wOk,
       latest: bucket.latest,
-    });
+    };
+    score.rank = stableRank(score);
+    scores.set(address, score);
   }
   return scores;
+}
+
+// ?isp=ct|cu|cm：只用对应运营商探针的结果（手机回传等非探针数据照常参与）
+export function normalizeIsp(value) {
+  const isp = String(value || "").trim().toUpperCase();
+  return ["CT", "CU", "CM"].includes(isp) ? isp : null;
+}
+
+export function filterEntriesByIsp(entries, isp) {
+  const target = normalizeIsp(isp);
+  if (!target) return entries;
+  return entries.filter((item) => {
+    const region = String(item?.region || "").toUpperCase();
+    if (!/^CN-(CT|CU|CM)$/.test(region)) return true;
+    return region === `CN-${target}`;
+  });
 }
 
 async function readCnProbeEntries(env, { days, now = Date.now() } = {}) {
@@ -235,8 +311,10 @@ export async function loadIpScores(env, options = {}) {
   const loaded = await loadIpEntries(env, options);
   const storage = loaded.storage;
   // 手机/本机回传 + 国内三网自动实测合并评分
-  const entries = [...loaded.entries, ...(await readCnProbeEntries(env, options))];
-  return { scores: summarizeIpScores(entries), storage, count: entries.length };
+  const all = [...loaded.entries, ...(await readCnProbeEntries(env, options))];
+  const entries = filterEntriesByIsp(all, options.isp);
+  const now = Number.isFinite(Number(options.now)) ? Number(options.now) : Date.now();
+  return { scores: summarizeIpScores(entries, { now }), storage, count: entries.length };
 }
 
 function getClientIp(request) {

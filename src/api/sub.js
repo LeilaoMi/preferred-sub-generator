@@ -5,10 +5,12 @@ import { generateVlessUri } from "../generator/vless.js";
 import { requireReadAuth } from "../security/auth.js";
 import { jsonResponse, privateTextResponse, unauthorizedResponse } from "../utils/response.js";
 import { formatEdgeNodeName } from "../utils/colo.js";
-import { loadIpScores } from "./ip-feedback.js";
+import { loadIpScores, normalizeIsp } from "./ip-feedback.js";
+import { applySnapshotFallback, CN_COMMUNITY_KEY, CN_VERIFIED_KEY, readSnapshot, snapshotList } from "./cn-verified.js";
+import { applyHostRotation, readHostHealth, rotationEnabled } from "./host-health.js";
 import { getNodeConfig, getNodeConfigFromUrl, nodeConfigToTemplate, validateNodeConfig } from "../config/nodes.js";
 import { readBestIps, readBestIpsV6, readPendingCnIps } from "./kv.js";
-import { filterNodesByColo, isMeasuredOk, parseColoFilter, orderNodesByMeasurement, readRttDropMs, sampleNodes, selectVerifiedNodes, withPreferredPort } from "./node-filter.js";
+import { filterNodesByColo, isMeasuredOk, parseColoFilter, readMinNodes, readRttDropMs, sampleNodes, selectVerifiedNodes, withPreferredPort } from "./node-filter.js";
 import { getPreferredPortOrder } from "../utils/ports.js";
 
 const MAX_NODES = 50;
@@ -76,6 +78,15 @@ function wrapText(text, width) {
   return text.match(new RegExp(`.{1,${width}}`, "g"))?.join("\n") || text;
 }
 
+async function readDefaultIsp(kv) {
+  try {
+    const state = JSON.parse((await kv?.get?.("CN_PROBE_STATE")) || "{}");
+    return normalizeIsp(state.defaultIsp);
+  } catch {
+    return null;
+  }
+}
+
 export async function handleSub(request, env) {
   const url = new URL(request.url);
   const edgeProbe = isEdgetunnelProbe(url, request);
@@ -126,9 +137,14 @@ export async function handleSub(request, env) {
   let scores = null;
   nodes = await readBestIps(env.SUB_KV);
   const rankOff = url.searchParams.get("rank") === "off";
+  // ?isp=ct|cu|cm 分运营商订阅：只用该运营商探针的国内实测排序；缺省为三网综合
+  // edgetunnel 的 sub:// 只取域名（url.origin），带不了 ?isp=，所以默认运营商也可用 GitHub 变量 SUB_DEFAULT_ISP 设置
+  // （china-probe 写进 CN_PROBE_STATE.defaultIsp），或 Pages 环境变量同名。
+  const ispParam = String(url.searchParams.get("isp") || "").toLowerCase();
+  const isp = ispParam === "all" ? null : normalizeIsp(ispParam) || normalizeIsp(env.SUB_DEFAULT_ISP) || (rankOff ? null : await readDefaultIsp(env.SUB_KV));
   if (!rankOff) {
     // 选节点只认最近 SUB_VERIFIED_DAYS 天（默认 3）的国内实测，太旧的实测不代表现在的线路
-    ({ scores } = await loadIpScores(env, { days: env.SUB_VERIFIED_DAYS || 3 }));
+    ({ scores } = await loadIpScores(env, { days: env.SUB_VERIFIED_DAYS || 3, isp }));
     // 待验证反代池里国内实测 ok 的才并入（不在 BEST_IPS 里的）
     if (!sampleMode && scores && scores.size > 0) {
       const dropMs = readRttDropMs(env);
@@ -137,6 +153,18 @@ export async function handleSub(request, env) {
         .filter((node) => !known.has(node.address) && isMeasuredOk(scores.get(node.address), dropMs))
         .map(({ pendingCn, ...node }) => ({ ...node, name: node.address, source: node.source }));
       nodes = [...nodes, ...pending];
+    }
+    // 兜底：新鲜的国内实测 ok 不够 SUB_MIN_NODES 时，先用自己最后一次正常的国内快照，再用社区实测池
+    if (!sampleMode) {
+      const dropMs = readRttDropMs(env);
+      const floor = readMinNodes(env);
+      const countOk = () => nodes.filter((node) => isMeasuredOk(scores?.get(node.address), dropMs)).length;
+      if (countOk() < floor) {
+        ({ nodes, scores } = applySnapshotFallback(nodes, scores, snapshotList(await readSnapshot(env.SUB_KV, CN_VERIFIED_KEY), isp), { penalty: 50, source: "cn-snapshot" }));
+      }
+      if (countOk() < floor) {
+        ({ nodes, scores } = applySnapshotFallback(nodes, scores, snapshotList(await readSnapshot(env.SUB_KV, CN_COMMUNITY_KEY), isp), { penalty: 1000, source: "cn-community" }));
+      }
     }
   }
   // P1-3: SUB_PREFERRED_PORTS 可覆盖端口顺序
@@ -162,6 +190,11 @@ export async function handleSub(request, env) {
   if (!edgeProbe && url.searchParams.get("ip6") === "1") {
     const v6Nodes = await readBestIpsV6(env.SUB_KV);
     nodes = [...nodes, ...v6Nodes.map((node) => withPreferredPort({ ...node, name: `[IPv6] ${node.name || node.address}` }, portOrder))];
+  }
+  // 多域名轮换（可选，SUB_ROTATE_HOSTS=1）：节点的 host/sni 只用该运营商国内体检没被墙的域名
+  if (!edgeProbe) {
+    const health = await readHostHealth(env.SUB_KV);
+    if (rotationEnabled(health, env)) nodes = applyHostRotation(nodes, template, health, { isp, env });
   }
   const generatorOptions = { autoTest: true };
   // 2026-10-12：url-test 常开。服务器只保证"节点活着"，最终选择交给客户端实测——

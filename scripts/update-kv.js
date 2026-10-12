@@ -5,6 +5,7 @@ import { checkCandidates } from "./lib/check.js";
 import { collectCandidatesWithHealth, isIPv6 } from "./lib/candidates.js";
 import { downloadSpeed } from "./lib/speed.js";
 import { runAlertStage } from "./lib/alert.js";
+import { sendNotification } from "./lib/notify.js";
 import { deleteKvValue, readKvValue, writeKvValue } from "./lib/kv.js";
 
 const ROOT = new URL("..", import.meta.url);
@@ -378,21 +379,8 @@ async function readPreviousVersionIndex() {
 }
 
 async function postWebhook(body) {
-  const url = process.env.UPDATE_WEBHOOK_URL;
-  if (!url) return false;
-
-  try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!response.ok) console.warn(`Webhook notification failed: ${response.status}`);
-    return response.ok;
-  } catch (error) {
-    console.warn(`Webhook notification failed: ${error.message}`);
-    return false;
-  }
+  // Webhook / Telegram / Bark 配了哪个推哪个（scripts/lib/notify.js）
+  return sendNotification(body);
 }
 
 async function readPreviousAlertState() {

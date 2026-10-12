@@ -53,6 +53,15 @@ function round(value, digits) {
   return Math.round(value * factor) / factor;
 }
 
+// 有稳定排序分（RTT 分桶 + 远端机房/失败率加罚）时按它排，没有时按 RTT；分数相同保持原序
+function byRank(a, b) {
+  const ra = Number(a.score?.rank);
+  const rb = Number(b.score?.rank);
+  if (Number.isFinite(ra) && Number.isFinite(rb) && ra !== rb) return ra - rb;
+  if (Number.isFinite(ra) && Number.isFinite(rb)) return 0;
+  return a.rtt - b.rtt;
+}
+
 // 实测 RTT 淘汰门槛：超过这个值的节点对 Leo 的线路基本不可用。
 // 这是约束（ToiCF：每个关键数字都要能说出为什么），不是偏好。
 const DEFAULT_RTT_DROP_MS = 1000;
@@ -111,7 +120,7 @@ export function orderNodesByMeasurement(nodes, scores, options = {}) {
   });
 
   // 实测 RTT 升序；RTT 相同保持原序（稳定）
-  measured.sort((a, b) => a.rtt - b.rtt);
+  measured.sort(byRank);
 
   return [
     ...measured.map(({ node, score }) => decorateMeasured(node, score)),
@@ -204,7 +213,7 @@ export function selectVerifiedNodes(nodes, scores, { limit, minNodes, env = {}, 
     else if (PINNED_SOURCES.has(node?.source)) pinned.push(node);
     else rest.push(node);
   }
-  measured.sort((a, b) => a.rtt - b.rtt);
+  measured.sort(byRank);
 
   const verified = [...measured.map(({ node, score }) => decorateMeasured(node, score)), ...pinned];
   const filler = verified.length < floor ? rest.slice(0, floor - verified.length) : [];

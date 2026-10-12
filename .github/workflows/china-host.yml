@@ -1,0 +1,50 @@
+name: China Host Check (Globalping)
+
+# 国内域名体检 + 「IP × 你的域名」组合实测，每 6 小时一轮（与 china-probe 错开）。
+# 不配置任何变量也能跑：默认测订阅自己的 <Pages 项目>.pages.dev。
+on:
+  schedule:
+    - cron: "50 1,7,13,19 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preferred-sub-generator-china-host
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: 自动定位 KV 命名空间
+        run: node scripts/cf-bootstrap.js
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN_2 }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_NAMESPACE_ID: ${{ secrets.CLOUDFLARE_NAMESPACE_ID }}
+          PAGES_PROJECT: ${{ vars.PAGES_PROJECT }}
+
+      - name: 国内域名体检 + 组合实测
+        run: node scripts/china-host-check.js
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN_2 }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          GLOBALPING_TOKEN: ${{ secrets.GLOBALPING_TOKEN }}
+          CHECK_HOSTS: ${{ vars.CHECK_HOSTS }}
+          VLESS_HOST: ${{ vars.VLESS_HOST }}
+          VLESS_SNI: ${{ vars.VLESS_SNI }}
+          SUB_DOMAIN: ${{ vars.SUB_DOMAIN }}
+          CN_COMBO_TOP: ${{ vars.CN_COMBO_TOP }}
+          SUB_ROTATE_HOSTS: ${{ vars.SUB_ROTATE_HOSTS }}
+          ALERT_MIN_AVAILABLE: ${{ vars.ALERT_MIN_AVAILABLE }}
+          UPDATE_WEBHOOK_URL: ${{ secrets.UPDATE_WEBHOOK_URL }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          BARK_URL: ${{ secrets.BARK_URL }}

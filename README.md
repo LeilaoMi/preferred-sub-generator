@@ -32,6 +32,32 @@
 - `manual.txt` 条目即使美国扫描不过审也保留在池里（`edgeVerified:false`）。
 - 修复：扫描时解析不出 HTTP 状态码的回包不再判为可用。
 
+## 2026-10-13：国内视角增强（分运营商 · 域名体检 · 组合实测 · 抗抖动）
+
+所有新功能**不配置也能跑**，配了变量效果更好。变量都在 GitHub 仓库 → Settings → Secrets and variables → Actions 里填，手机浏览器就能操作。
+
+| 功能 | 做什么 | 怎么开 |
+|---|---|---|
+| 分运营商订阅 | 只用电信 / 联通 / 移动对应探针的实测排序 | 订阅链接加 `?isp=ct`、`?isp=cu` 或 `?isp=cm`。edgetunnel 的 `sub://` 只取域名、带不了参数，所以要设变量 `SUB_DEFAULT_ISP=CU` 这类默认值；`?isp=all` 强制三网综合 |
+| 域名体检 | 从国内三网 HTTPS 访问你的节点域名，发现 DNS 污染、SNI 阻断（连接被重置） | 变量 `CHECK_HOSTS=1.a.cc,2.a.cc`。不填就测 `VLESS_HOST`，再不填就测订阅自己的 `*.pages.dev` |
+| 组合实测 | 目标写 IP、SNI 写你的域名，和 edgetunnel 真实连接一模一样：识别 1034、重置，拿到**落地机房** | 填了 `CHECK_HOSTS` / `VLESS_HOST` 自动开启，每轮测快照前 `CN_COMBO_TOP`（默认 10）个 IP |
+| 落地机房评分 | 落地在香港 / 日本 / 新加坡 / 美西的加分，绕到欧洲、美东的扣 80ms | 自动 |
+| 抗抖动 | 实测按 24 小时半衰期衰减，RTT 按 20ms 分桶，失败率加罚：节点顺序不再乱跳 | 自动 |
+| 晚高峰加权 | 北京时间 20–23 点的实测权重 ×1.5，白天快、晚上掉线的 IP 会自动沉下去 | 自动（china-probe 每 2 小时一轮，已覆盖晚高峰） |
+| 国内快照兜底 | 每轮把三网各自实测 ok 的名单存成 `CN_VERIFIED`；Globalping 挂了或实测过期，订阅照样输出国内验证过的 IP | 自动 |
+| 多域名轮换 | 节点的 host/sni 轮流用 `CHECK_HOSTS` 里**该运营商没被墙**的域名 | 变量 `SUB_ROTATE_HOSTS=1`（前提：这些域名都绑在同一个 edgetunnel 上；只对直接订阅生效，edgetunnel 的节点域名由它自己决定） |
+| 社区实测池 | 把你的国内已验证 IP（只有 IP / 延迟 / 机房，不含域名和 UUID）公开在 `/cn-verified`；新复刻的人填别人的地址，开箱就有国内数据 | 分享方：变量 `PUBLIC_CN_VERIFIED=1`；使用方：变量 `COMMUNITY_POOL_URL=https://别人的域名/cn-verified`。社区数据永远排在自己的实测之后，而且会先拿去自己的探针复测 |
+| 手机告警 | 域名被墙、某网已验证节点 < 10、刷新失败时推送；同样内容 24 小时只推一次，恢复也推 | Secrets：`TG_BOT_TOKEN` + `TG_CHAT_ID`（Telegram），或 `BARK_URL`（如 `https://api.day.app/你的key`），或原有的 `UPDATE_WEBHOOK_URL` |
+
+`/status` 新增 `cnHosts`（每个域名在三网的 `ok / unstable / blocked`）和 `cnProbe.verified`（三网各有多少已验证节点）。
+
+**实测发现（2026-10-13）**：
+- 移动对 `ccwu.cc` 子域名普遍做 SNI 阻断（10 个子域名里 7 个被判 blocked，其余也时好时坏），同网络访问 `speed.cloudflare.com` 全通。这种封锁跟 IP 无关，换优选 IP 没用，只能换域名后缀。
+- 同一个 IP、同一个域名，美国访问正常，国内却可能返回 `1034`，所以 IP 和域名合不合适只有国内组合测能判断准。
+- 同一个 IP 在不同运营商的落地机房差别很大（比如联通落地 LAX/SJC/HKG，电信落地 FRA），这就是分运营商订阅的意义。
+
+**额度**：域名体检每个域名每轮 6 次（三网各 2 个探针），10 个域名加 10 个组合测 IP，每 6 小时一轮共约 90 次，远低于 Globalping 每小时额度。
+
 ## 功能特性
 
 - 节点配置来自环境变量离散配置（VLESS_UUID / VLESS_SNI / VLESS_HOST / VLESS_PATH 等，对标竞品），项目内不保存任何模板；管理页只读展示当前配置并校验风险项（如 workers.dev SNI 在中国大陆被阻断）。
@@ -379,7 +405,9 @@ VLESS_SECURITY   默认 tls
 CLOUDFLARE_API_TOKEN_2    用于 GitHub Actions 写 KV 的 Cloudflare API Token（当前账号）
 CLOUDFLARE_ACCOUNT_ID     Cloudflare 账号 ID
 CLOUDFLARE_NAMESPACE_ID   SUB_KV 的 Namespace ID
-UPDATE_WEBHOOK_URL        可选，告警 Webhook（Telegram/Slack/企业微信机器人等）
+UPDATE_WEBHOOK_URL        可选，告警 Webhook（原样 POST JSON）
+TG_BOT_TOKEN / TG_CHAT_ID 可选，Telegram 机器人告警
+BARK_URL                  可选，iOS Bark 告警，如 https://api.day.app/你的key
 ```
 
 可选配置 Actions Variables（阈值调优）：

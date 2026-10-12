@@ -52,6 +52,9 @@ jobs:
           ALLOW_RELAY: ${{ vars.ALLOW_RELAY }}
           EDGE_BLACKLIST: ${{ vars.EDGE_BLACKLIST }}
           UPDATE_WEBHOOK_URL: ${{ secrets.UPDATE_WEBHOOK_URL }}
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+          BARK_URL: ${{ secrets.BARK_URL }}
           UPDATE_WEBHOOK_ALWAYS: ${{ vars.UPDATE_WEBHOOK_ALWAYS }}
           ALERT_REPEAT_HOURS: ${{ vars.ALERT_REPEAT_HOURS }}
           ALERT_FALLBACK_THRESHOLD: ${{ vars.ALERT_FALLBACK_THRESHOLD }}
