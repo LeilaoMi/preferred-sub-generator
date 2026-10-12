@@ -2,7 +2,7 @@ import { requireReadAuth } from "../security/auth.js";
 import { jsonResponse, unauthorizedResponse } from "../utils/response.js";
 import { readBestIpsVersion } from "./kv.js";
 import { loadIpScores } from "./ip-feedback.js";
-import { filterNodesByColo, parseColoFilter, rankNodesByScore } from "./node-filter.js";
+import { filterNodesByColo, parseColoFilter, orderNodesByMeasurement } from "./node-filter.js";
 
 const MAX_NODES = 50;
 
@@ -23,7 +23,7 @@ export async function handleBest(request, env) {
   let droppedUnreachable = 0;
   if (url.searchParams.get("rank") !== "off") {
     const { scores } = await loadIpScores(env);
-    nodes = rankNodesByScore(nodes, scores, { env });
+    nodes = orderNodesByMeasurement(nodes, scores, { env });
     droppedUnreachable = allNodes.length - nodes.length;
   }
   const filtered = filterNodesByColo(nodes, colos);

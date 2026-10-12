@@ -50,21 +50,17 @@ export function formatColo(colo) {
   return COLO_LABELS[code] ? `${COLO_LABELS[code]} ${code}` : `🌐 ${code}`;
 }
 
-function shouldKeepName(name) {
-  return name && !String(name).startsWith("CF Edge ");
-}
-
-export function formatEdgeNodeName(node, index, options = {}) {
+export function formatEdgeNodeName(node, index) {
   const measured = node.userRtt != null && Number.isFinite(Number(node.userRtt))
     ? Math.round(Number(node.userRtt))
     : null;
-  // P2-6: 保留 [IPv6] 标记（抽样模式重命名时也不丢）
+  // P2-6: 保留 [IPv6] 标记
   const v6Prefix = String(node.name || "").startsWith("[IPv6] ") ? "[IPv6] " : "";
-  // 抽样模式下节点名不再沿用存量名称（其中嵌着美国测速机的延迟），改为按落点现生成
-  if (measured === null && !options.hideLatency && shouldKeepName(node.name)) return node.name;
+  // 2026-10-12 诚实原则（Rams）：节点名只显示 Leo 本机的实测延迟。
+  // 美国扫描机的延迟（node.latency）是 demo 数据，印在名字里等于骗人——删掉。
+  // 没实测过的节点只显示落点，不假装知道快慢。
+  // 名字每次请求现生成，不沿用 KV 里存的老名字（老名字可能嵌着旧延迟）。
   const location = formatColo(node.userColo || node.colo) || "🌐 未识别地区";
-  const latency = measured !== null
-    ? ` ${measured}ms 实测`
-    : (options.hideLatency ? "" : (Number.isFinite(Number(node.latency)) ? ` ${node.latency}ms` : ""));
+  const latency = measured !== null ? ` ${measured}ms 实测` : "";
   return `${v6Prefix}${location}${latency} #${index + 1}`;
 }

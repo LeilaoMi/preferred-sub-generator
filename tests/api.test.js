@@ -7,7 +7,7 @@ import { handleSub } from "../src/api/sub.js";
 import { handleTemplateGet, handleTemplatePost } from "../src/api/template.js";
 import { handleVersions } from "../src/api/versions.js";
 
-const expectedGeneratedName = "🇺🇸 美国洛杉矶 LAX 12ms #1";
+const expectedGeneratedName = "🇺🇸 美国洛杉矶 LAX #1";
 const expectedEncodedGeneratedName = encodeURIComponent(expectedGeneratedName);
 
 const template = "vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=tls&sni=example.com&type=ws&host=example.com&path=%2Fws#原始节点";
@@ -100,15 +100,15 @@ test("sub generates Clash subscription", async () => {
   assert.equal(response.headers.get("Content-Disposition"), 'inline; filename="preferred-sub.yaml"');
   assert.match(text, /server: "1.1.1.1"/);
   assert.match(text, /server: "1.1.1.2"/);
-  assert.match(text, /🇺🇸 美国洛杉矶 LAX 12ms #1/);
-  assert.match(text, /🇺🇸 美国圣何塞 SJC 34ms #2/);
+  assert.match(text, /🇺🇸 美国洛杉矶 LAX #1/);
+  assert.match(text, /🇺🇸 美国圣何塞 SJC #2/);
   assert.doesNotMatch(text, /1\.1\.1\.3/);
 });
 
 function createSampleEnv() {
   const pool = [
-    { address: "1.1.1.1", port: 2087, ports: [2087, 443], name: "🇺🇸 美国洛杉矶 LAX 12ms #1", colo: "LAX", latency: 12 },
-    { address: "1.1.1.2", port: 8443, ports: [8443], name: "🇺🇸 美国圣何塞 SJC 34ms #2", colo: "SJC", latency: 34 },
+    { address: "1.1.1.1", port: 2087, ports: [2087, 443], name: "🇺🇸 美国洛杉矶 LAX #1", colo: "LAX", latency: 12 },
+    { address: "1.1.1.2", port: 8443, ports: [8443], name: "🇺🇸 美国圣何塞 SJC #2", colo: "SJC", latency: 34 },
     { address: "1.1.1.3", port: 443, ports: [443], name: "优选-3", colo: "HKG", latency: 55 },
   ];
   const data = new Map([
@@ -147,8 +147,16 @@ test("sub sample mode prefers 443 and hides upstream latency in names", async ()
   // 名称不再带美国测速机的延迟（12ms/34ms/55ms 都不许出现）
   assert.doesNotMatch(text, /12ms|34ms|55ms/);
   assert.match(text, /🇺🇸 美国洛杉矶 LAX #\d/);
-  // 抽样模式带自动测速组；旧模式不带
+  // url-test 默认开启（2026-10-12 起所有模式都带）
   assert.match(text, /type: url-test/);
+});
+
+test("sub default mode also carries url-test group", async () => {
+  const response = await handleSub(subRequest("/sub?type=clash&n=3"), createEnv());
+  const text = await response.text();
+  assert.equal(response.status, 200);
+  assert.match(text, /type: url-test/);
+  assert.match(text, /name: "自动测速"/);
 });
 
 test("sub sample mode applies to singbox with urltest outbound", async () => {
@@ -225,7 +233,7 @@ test("edgetunnel probe caps sampled nodes at 30", async () => {
   assert.equal(decoded.split("\n").filter(Boolean).length, 30);
 });
 
-test("edgetunnel probe uses KV pool by default (cidr is opt-in only)", async () => {
+test("edgetunnel probe uses KV pool (mode=cidr was removed)", async () => {
   const pool = Array.from({ length: 40 }, (_, index) => ({
     address: `10.0.0.${index + 1}`,
     port: 443,
@@ -251,7 +259,7 @@ test("edgetunnel probe uses KV pool by default (cidr is opt-in only)", async () 
     SUB_PUBLIC: "0",
     SUB_KV: { async get(key) { return data.get(key) || null; }, put(key, value) { data.set(key, value); } },
   };
-  // 不带 mode 参数的探测：默认走 KV 池（稳定），cidr 必须显式 ?mode=cidr
+  // 不带 mode 参数的探测：默认走 KV 池（稳定）
   const probe = new Request(
     "https://example.com/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000",
     { headers: { "User-Agent": "edgetunnel/2.3.1" } },
@@ -260,9 +268,16 @@ test("edgetunnel probe uses KV pool by default (cidr is opt-in only)", async () 
   assert.equal(response.status, 200);
   const decoded = Buffer.from(await response.text(), "base64").toString("utf8");
   const lines = decoded.split("\n").filter(Boolean);
-  // KV 池 40 个 → 探测采样上限 30 个；IP 来自测试池（10.0.0.x）而非 CIDR 段
+  // KV 池 40 个 → 探测采样上限 30 个；IP 来自测试池（10.0.0.x）
   assert.equal(lines.length, 30);
   assert.match(decoded, /10\.0\.0\./);
+});
+
+test("sub rejects removed mode=cidr with a clear error", async () => {
+  const response = await handleSub(subRequest("/sub?mode=cidr"), createEnv());
+  assert.equal(response.status, 400);
+  const body = await response.json();
+  assert.equal(body.code, "UNSUPPORTED_MODE");
 });
 
 test("sub sample mode rotates subsets across requests", async () => {
@@ -320,9 +335,13 @@ test("sub generates Sing-box subscription with localized generated names", async
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("Content-Type"), "application/json; charset=utf-8");
   assert.equal(response.headers.get("Content-Disposition"), 'inline; filename="preferred-sub.json"');
-  assert.equal(parsed.outbounds.length, 1);
-  assert.equal(parsed.outbounds[0].server, "1.1.1.1");
-  assert.equal(parsed.outbounds[0].tag, expectedGeneratedName);
+  assert.equal(parsed.outbounds.length, 3);
+  // url-test 默认开启：自动测速组 + 选择器 + 节点
+  assert.equal(parsed.outbounds[0].type, "urltest");
+  assert.equal(parsed.outbounds[0].tag, "自动测速");
+  assert.equal(parsed.outbounds[1].type, "selector");
+  assert.equal(parsed.outbounds[2].server, "1.1.1.1");
+  assert.equal(parsed.outbounds[2].tag, expectedGeneratedName);
 });
 
 test("P1-4 sub responses carry Subscription-Userinfo header", async () => {

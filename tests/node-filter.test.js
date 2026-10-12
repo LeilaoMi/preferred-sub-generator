@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { computeNodeScore, filterNodesByColo, preferredPort, rankNodesByScore, readScoreOptions, sampleNodes, sampleWeight, withPreferredPort } from "../src/api/node-filter.js";
+import { filterNodesByColo, isMeasuredOk, orderNodesByMeasurement, preferredPort, rankNodesByScore, readRttDropMs, sampleNodes, sampleWeight, withPreferredPort } from "../src/api/node-filter.js";
 import { getPortsForSecurity, getPreferredPortOrder } from "../src/utils/ports.js";
 
 const nodes = [
@@ -44,14 +44,16 @@ test("sampleNodes keeps pool when every node is marked unreachable", () => {
   assert.equal(sampled.length, 3);
 });
 
-test("sampleWeight rewards lower local rtt and higher speed", () => {
-  const fast = sampleWeight(nodes[0], { rtt: 20, speed: 50, unreachable: false });
-  const slow = sampleWeight(nodes[0], { rtt: 400, speed: 1, unreachable: false });
-  const none = sampleWeight(nodes[0], null);
+test("sampleWeight: measured nodes get 3, others get 1", () => {
+  const measured = sampleWeight({ rtt: 20, unreachable: false }, 1000);
+  const slow = sampleWeight({ rtt: 5000, unreachable: false }, 1000);
+  const dead = sampleWeight({ unreachable: true }, 1000);
+  const none = sampleWeight(null, 1000);
 
+  assert.equal(measured, 3);
+  assert.equal(slow, 1);
+  assert.equal(dead, 1);
   assert.equal(none, 1);
-  assert.ok(fast > slow);
-  assert.ok(slow >= 1);
 });
 
 test("withPreferredPort prefers 443 when the pool entry passed it", () => {
@@ -67,43 +69,64 @@ test("sampled selection composes with colo bucket filter", () => {
   assert.deepEqual(new Set(sampled.map((node) => node.address)), new Set(["1.1.1.1", "4.4.4.4"]));
 });
 
-test("rankNodesByScore still puts measured nodes first (legacy path unchanged)", () => {
+test("orderNodesByMeasurement sorts measured pool by real RTT, rest keep pool order", () => {
+  const scores = new Map([
+    ["3.3.3.3", { rtt: 90, speed: 10, colo: "HKG", samples: 2, failed: 0, unreachable: false }],
+    ["1.1.1.1", { rtt: 30, speed: 5, samples: 1, failed: 0, unreachable: false }],
+  ]);
+  const ranked = orderNodesByMeasurement(nodes, scores);
+
+  // 实测池按 RTT 升序：1.1.1.1 (30ms) 在 3.3.3.3 (90ms) 前面
+  assert.equal(ranked[0].address, "1.1.1.1");
+  assert.equal(ranked[0].userRtt, 30);
+  assert.equal(ranked[1].address, "3.3.3.3");
+  assert.equal(ranked[1].userRtt, 90);
+  // 没测过的保持原池顺序
+  assert.deepEqual(ranked.slice(2).map((n) => n.address), ["2.2.2.2", "4.4.4.4"]);
+});
+
+test("orderNodesByMeasurement drops nodes above the rtt threshold", () => {
+  const scores = new Map([
+    ["1.1.1.1", { rtt: 50, unreachable: false }],
+    ["2.2.2.2", { rtt: 5000, unreachable: false }],
+  ]);
+  const ranked = orderNodesByMeasurement(nodes, scores);
+  // 2.2.2.2 超过 1000ms 门槛，不进实测池，掉到后面
+  assert.equal(ranked[0].address, "1.1.1.1");
+  assert.ok(ranked.map((n) => n.address).indexOf("2.2.2.2") > 0);
+
+  const ranked2 = orderNodesByMeasurement(nodes, scores, { rttDropMs: 10000 });
+  assert.equal(ranked2[0].address, "1.1.1.1");
+  assert.equal(ranked2[1].address, "2.2.2.2");
+});
+
+test("orderNodesByMeasurement drops unreachable nodes but never empties the list", () => {
+  const scores = new Map(nodes.map((node) => [node.address, { unreachable: true }]));
+  const ranked = orderNodesByMeasurement(nodes, scores);
+  assert.equal(ranked.length, 4);
+});
+
+test("isMeasuredOk is the single source of truth for usable measurements", () => {
+  assert.equal(isMeasuredOk({ rtt: 50, unreachable: false }, 1000), true);
+  assert.equal(isMeasuredOk({ rtt: 5000, unreachable: false }, 1000), false);
+  assert.equal(isMeasuredOk({ rtt: 50, unreachable: true }, 1000), false);
+  assert.equal(isMeasuredOk({ rtt: null, unreachable: false }, 1000), false);
+  assert.equal(isMeasuredOk(null, 1000), false);
+});
+
+test("readRttDropMs reads SUB_RTT_DROP_MS with a sane default", () => {
+  assert.equal(readRttDropMs({ SUB_RTT_DROP_MS: "2000" }), 2000);
+  assert.equal(readRttDropMs({ SUB_RTT_DROP_MS: "bogus" }), 1000);
+  assert.equal(readRttDropMs({}), 1000);
+});
+
+// 旧名别名保留，后续版本删除
+test("rankNodesByScore is an alias of orderNodesByMeasurement", () => {
   const scores = new Map([["3.3.3.3", { rtt: 9, speed: 10, colo: "HKG", samples: 2, failed: 0, unreachable: false }]]);
   const ranked = rankNodesByScore(nodes, scores);
 
   assert.equal(ranked[0].address, "3.3.3.3");
   assert.equal(ranked[0].userRtt, 9);
-});
-
-test("P1-9 rankNodesByScore drops nodes above the rtt threshold", () => {
-  const scores = new Map([
-    ["1.1.1.1", { rtt: 50, unreachable: false }],
-    ["2.2.2.2", { rtt: 5000, unreachable: false }],
-  ]);
-  const ranked = rankNodesByScore(nodes, scores);
-  assert.deepEqual(ranked.map((node) => node.address), ["1.1.1.1", "2.2.2.2", "3.3.3.3", "4.4.4.4"]);
-
-  const ranked2 = rankNodesByScore(nodes, scores, { rttDropMs: 10000 });
-  assert.equal(ranked2[0].address, "1.1.1.1");
-  assert.equal(ranked2[1].address, "2.2.2.2");
-});
-
-test("P2-11 computeNodeScore penalizes jitter and rewards speed", () => {
-  const base = { rtt: 50, speed: 10, colo: "HKG", unreachable: false };
-  const calm = computeNodeScore({ address: "a", jitter: 5 }, base);
-  const jitty = computeNodeScore({ address: "b", jitter: 400 }, base);
-  assert.ok(calm > jitty);
-
-  const fast = computeNodeScore({}, { rtt: 50, speed: 90, unreachable: false });
-  const slow = computeNodeScore({}, { rtt: 50, speed: 5, unreachable: false });
-  assert.ok(fast > slow);
-});
-
-test("P2-11 readScoreOptions reads SUB_SCORE_W_* env overrides", () => {
-  const opts = readScoreOptions({ SUB_SCORE_W_SPEED: "2.5", SUB_RTT_DROP_MS: "2000", SUB_SCORE_W_RTT: "bogus" });
-  assert.equal(opts.wS, 2.5);
-  assert.equal(opts.rttDropMs, 2000);
-  assert.equal(opts.wR, 2.0);
 });
 
 test("P1-3 getPortsForSecurity honors SUB_PREFERRED_PORTS override", () => {

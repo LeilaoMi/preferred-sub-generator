@@ -40,63 +40,40 @@ export function filterNodesByColo(nodes, colos) {
   return { nodes: matched, filtered: true, matched: true, fallback: false, matchedCount: matched.length };
 }
 
+// P2-11（2026-10-12 重设计，已删除）：多维加权评分公式
+// score = (wS·带宽 + wC·落点加成 + 0.1) / (1 + wR·延迟 + wJ·抖动)
+// 删除原因：公式试图用"美国扫描机的数据"回答"哪个节点对 Leo 最快"，
+// 这是 demo 数据冒充真实信号（Karpathy：对 demo 免疫）。
+// 唯一真实信号是 Leo 本机的实测（probe-ips.js → ip-feedback）。
+// 新模型：实测 ok 的按实测 RTT 排序；没测过的只保证"活着"，不排名。
+// 5 个 SUB_SCORE_W_* 权重旋钮一并删除（DHH：偏好设置是逃避艰难决定）。
+
 function round(value, digits) {
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
 }
 
-// P2-11: 多维加权评分的默认权重；默认行为接近旧排序（rtt 主导、speed 次之），避免线上突变
-const SCORE_DEFAULTS = {
-  wS: 1.0, // 带宽权重
-  wC: 0.5, // 已知落点（用户实测出 colo）加成权重
-  wR: 2.0, // 延迟惩罚权重
-  wJ: 1.0, // 抖动惩罚权重
-  rttDropMs: 1000, // P1-9: rtt 只做淘汰门槛，超过直接丢弃
-  speedRefMbps: 100, // 带宽归一化基准
-  jitterRefMs: 500, // 抖动归一化基准
-};
+// 实测 RTT 淘汰门槛：超过这个值的节点对 Leo 的线路基本不可用。
+// 这是约束（ToiCF：每个关键数字都要能说出为什么），不是偏好。
+const DEFAULT_RTT_DROP_MS = 1000;
 
-function readNumber(value, fallback) {
-  const n = Number(value);
-  return Number.isFinite(n) && n >= 0 ? n : fallback;
+export function readRttDropMs(env = {}) {
+  const n = Number(env.SUB_RTT_DROP_MS);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_RTT_DROP_MS;
 }
 
-export function readScoreOptions(env = {}) {
-  return {
-    wS: readNumber(env.SUB_SCORE_W_SPEED, SCORE_DEFAULTS.wS),
-    wC: readNumber(env.SUB_SCORE_W_COLO, SCORE_DEFAULTS.wC),
-    wR: readNumber(env.SUB_SCORE_W_RTT, SCORE_DEFAULTS.wR),
-    wJ: readNumber(env.SUB_SCORE_W_JITTER, SCORE_DEFAULTS.wJ),
-    rttDropMs: readNumber(env.SUB_RTT_DROP_MS, SCORE_DEFAULTS.rttDropMs),
-    speedRefMbps: SCORE_DEFAULTS.speedRefMbps,
-    jitterRefMs: SCORE_DEFAULTS.jitterRefMs,
-  };
-}
-
-function resolveScoreOptions(options = {}) {
-  const resolved = readScoreOptions(options.env || {});
-  for (const key of ["wS", "wC", "wR", "wJ", "rttDropMs"]) {
-    if (options[key] != null && Number.isFinite(Number(options[key])) && Number(options[key]) >= 0) {
-      resolved[key] = Number(options[key]);
-    }
+function resolveRttDropMs(options = {}) {
+  if (options.rttDropMs != null && Number.isFinite(Number(options.rttDropMs)) && Number(options.rttDropMs) > 0) {
+    return Number(options.rttDropMs);
   }
-  return resolved;
+  return readRttDropMs(options.env || {});
 }
 
-// P2-11: score = (wS*speedNorm + wC*coloBonus + base) / (1 + wR*rttNorm + wJ*jitterNorm)
-// 各维度归一化到 0~1；base=0.1 保证无带宽数据时 rtt 仍能区分排序（否则分子全 0 退化为原序）
-const SCORE_BASE = 0.1;
-
-export function computeNodeScore(node, score, options = {}) {
-  const opts = resolveScoreOptions(options);
-  const speed = Number(score?.speed);
-  const speedNorm = Number.isFinite(speed) && speed > 0 ? Math.min(speed / opts.speedRefMbps, 1) : 0;
-  const coloBonus = score?.colo ? 1 : 0;
+// 一条实测记录算"可用"的唯一标准：没判死、RTT 有限、没超过淘汰门槛
+export function isMeasuredOk(score, rttDropMs) {
+  if (!score || score.unreachable) return false;
   const rtt = Number(score?.rtt);
-  const rttNorm = Number.isFinite(rtt) && rtt > 0 ? Math.min(rtt / opts.rttDropMs, 1) : 1;
-  const jitter = Number(node?.jitter);
-  const jitterNorm = Number.isFinite(jitter) && jitter > 0 ? Math.min(jitter / opts.jitterRefMs, 1) : 0;
-  return (opts.wS * speedNorm + opts.wC * coloBonus + SCORE_BASE) / (1 + opts.wR * rttNorm + opts.wJ * jitterNorm);
+  return Number.isFinite(rtt) && rtt > 0 && rtt <= rttDropMs;
 }
 
 export function decorateMeasured(node, score) {
@@ -111,32 +88,30 @@ export function decorateMeasured(node, score) {
   };
 }
 
-export function rankNodesByScore(nodes, scores, options = {}) {
+// 两池模型（2026-10-12）：
+// 池 A：Leo 实测 ok 的节点，按实测 RTT 升序——这是唯一真实信号，快者先。
+// 池 B：其余过审节点（6 小时内验证活着），保持池顺序——不假装知道快慢。
+// 实测判死的直接剔除；若全部判死则保留原列表（订阅不断流）。
+export function orderNodesByMeasurement(nodes, scores, options = {}) {
   const list = Array.isArray(nodes) ? nodes : [];
-  if (!scores || scores.size === 0) return list;
-  const opts = resolveScoreOptions(options);
+  const rttDropMs = resolveRttDropMs(options);
 
-  // 实测判定为不可用的 IP 直接剔除；若全部不可用则保留原列表（避免订阅被清空）
-  const filtered = list.filter((node) => scores.get(node?.address)?.unreachable !== true);
-  const base = filtered.length > 0 ? filtered : list;
+  const alive = list.filter((node) => scores?.get(node?.address)?.unreachable !== true);
+  const base = alive.length > 0 ? alive : list;
 
   const measured = [];
   const rest = [];
-  base.forEach((node, index) => {
-    const score = scores.get(node?.address);
-    const rtt = Number(score?.rtt);
-    // P1-9: rtt 只做淘汰门槛，不参与主排序
-    if (score && !score.unreachable && Number.isFinite(rtt) && rtt <= opts.rttDropMs) {
-      measured.push({ node, index, score, value: computeNodeScore(node, score, opts) });
+  base.forEach((node) => {
+    const score = scores?.get(node?.address);
+    if (isMeasuredOk(score, rttDropMs)) {
+      measured.push({ node, score, rtt: Number(score.rtt) });
     } else {
       rest.push(node);
     }
   });
 
-  if (measured.length === 0) return base;
-
-  // P2-11: 加权评分降序；分数相同时保持原序（稳定）
-  measured.sort((a, b) => b.value - a.value || (a.index - b.index));
+  // 实测 RTT 升序；RTT 相同保持原序（稳定）
+  measured.sort((a, b) => a.rtt - b.rtt);
 
   return [
     ...measured.map(({ node, score }) => decorateMeasured(node, score)),
@@ -144,16 +119,20 @@ export function rankNodesByScore(nodes, scores, options = {}) {
   ];
 }
 
-export function sampleWeight(node, score, options = {}) {
-  if (!score || score.unreachable) return 1;
-  // P2-11: 抽样与排名共用同一评分公式；权重恒 >=1，保证 Efraimidis–Spirakis 结构不变
-  return 1 + 3 * computeNodeScore(node, score, options);
+// 旧名保留为别名，测试与外部调用过渡用（下个版本删除）
+export const rankNodesByScore = orderNodesByMeasurement;
+
+// 抽样权重：有 Leo 实测的 3，没测过的 1。
+// 实测只抬高被抽中的概率，不决定入选资格——加权参考，不是排行榜。
+export function sampleWeight(score, rttDropMs) {
+  return isMeasuredOk(score, rttDropMs) ? 3 : 1;
 }
 
-export function sampleNodes(nodes, { limit, scores, random = Math.random, scoreOptions } = {}) {
+export function sampleNodes(nodes, { limit, scores, random = Math.random, rttDropMs, env } = {}) {
   const list = Array.isArray(nodes) ? nodes : [];
+  const dropMs = rttDropMs ?? readRttDropMs(env || {});
 
-  // 与排名模式相同口径：本地实测判死的剔除；若全部判死则保留全量，避免订阅被清空
+  // 与排序模式相同口径：本地实测判死的剔除；若全部判死则保留全量，避免订阅被清空
   let base = list;
   if (scores && scores.size > 0) {
     const filtered = list.filter((node) => scores.get(node?.address)?.unreachable !== true);
@@ -164,11 +143,10 @@ export function sampleNodes(nodes, { limit, scores, random = Math.random, scoreO
     ? Math.min(Number(limit), base.length)
     : base.length;
 
-  // Efraimidis–Spirakis 加权不放回抽样：key = random^(1/weight)，权重越高越容易排前面。
-  // 本地实测只抬高被抽中的概率，不决定入选资格——实测是加权参考，不是排行榜。
+  // Efraimidis–Spirakis 加权不放回抽样：key = random^(1/weight)，权重越高越容易排前面
   const keyed = base.map((node) => {
     const score = scores?.get(node?.address);
-    const weight = sampleWeight(node, score, scoreOptions);
+    const weight = sampleWeight(score, dropMs);
     const draw = Number(random());
     const safe = Number.isFinite(draw) ? Math.min(Math.max(draw, Number.EPSILON), 1 - Number.EPSILON) : 0.5;
     return { node: decorateMeasured(node, score), key: Math.pow(safe, 1 / weight) };

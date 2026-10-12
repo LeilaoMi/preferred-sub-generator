@@ -220,7 +220,7 @@ test("build update payload stores pooled checked nodes with colo names", async (
   assert.equal(bestIps[0].address, "1.1.1.1");
   assert.equal(bestIps[0].port, 443);
   assert.deepEqual(bestIps[0].ports, [443, 2053, 2083, 2087, 2096, 8443]);
-  assert.equal(bestIps[0].name, "🇺🇸 美国洛杉矶 LAX 1ms #1");
+  assert.equal(bestIps[0].name, "🇺🇸 美国洛杉矶 LAX #1");
   assert.equal(bestIps[0].colo, "LAX");
   assert.equal(bestIps[0].speed, null);
   assert.equal(status.updatedAt, "2026-06-03T00:00:00.000Z");
