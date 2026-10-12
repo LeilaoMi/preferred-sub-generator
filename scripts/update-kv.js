@@ -8,6 +8,7 @@ import { runAlertStage } from "./lib/alert.js";
 import { deleteKvValue, readKvValue, writeKvValue } from "./lib/kv.js";
 
 const ROOT = new URL("..", import.meta.url);
+export const DEFAULT_CHECK_HOST = "speed.cloudflare.com";
 const MIN_AVAILABLE_TO_OVERWRITE = 20;
 const DEFAULT_VERSION_RETENTION = 30;
 // KV 里存的是"过审池"而不是发给所有人的固定前 50 名；订阅端从池里抽样，池要够大才有轮换空间
@@ -191,7 +192,8 @@ export async function buildUpdatePayload({
   poolLimit = MAX_POOL_NODES,
 } = {}) {
   // 节点探测参数来自离散环境变量（对标竞品），不再解析模板 URI
-  const nodeHost = (nodeConfig?.host || nodeConfig?.sni || "").trim();
+  // 没配 VLESS_HOST / VLESS_SNI 时用 Cloudflare 自己的域名做通用初筛（与 cmliu 等做法一致，复刻零配置）
+  const nodeHost = (nodeConfig?.host || nodeConfig?.sni || DEFAULT_CHECK_HOST).trim();
   const nodeSecurity = (nodeConfig?.security || "tls").trim() || "tls";
   if (!nodeHost) throw new Error("Missing node host: 请配置 VLESS_SNI / VLESS_HOST 环境变量");
   const { candidates: allCandidates, sourceHealth } = await collectCandidatesWithHealth({ manualText, remoteSources, fetchImpl, maxSourceBytes, extraBlacklist: process.env.EDGE_BLACKLIST || "", allowRelay: process.env.ALLOW_RELAY !== "0" });

@@ -8,6 +8,18 @@
 
 > 隐私提醒：公开 `/sub` 等价于公开由真实 VLESS 模板派生出的完整订阅，包含 UUID、Host、SNI、path 等敏感参数。默认私密模式下，`/sub` 和 `/best` 需要只读 token；只有显式设置 `SUB_PUBLIC=1` 才会公开订阅。
 
+## 🚀 复刻部署三步（零配置）
+
+1. **Fork** 本仓库，在你的 fork 里打开 **Actions** 页，点「I understand my workflows, go ahead and enable them」（GitHub 对 fork 默认关闭定时任务）。
+2. 在 **Settings → Secrets and variables → Actions** 新建两个 secret：
+   - `CLOUDFLARE_ACCOUNT_ID`：Cloudflare 控制台右侧栏的账户 ID；
+   - `CLOUDFLARE_API_TOKEN`：在 Cloudflare「我的个人资料 → API 令牌」创建，权限勾选 **Cloudflare Pages：编辑、Workers KV 存储：编辑、D1：编辑**（D1 可不勾，没有时测速回传自动改用 KV）。
+3. 在 Actions 页依次手动运行 **Deploy to Cloudflare Pages** → **Update Preferred Subscription** → **China Probe (Globalping)**。
+
+完成。KV 命名空间、D1 数据库、Pages 项目全部由 `scripts/cf-bootstrap.js` 自动查找或创建，不需要改 `wrangler.toml`，也不需要填节点域名（未设置 `VLESS_HOST` 时用 `speed.cloudflare.com` 做通用初筛）。部署地址是 `https://preferred-sub-generator-xxx.pages.dev`（Pages 项目页可见），edgetunnel 里把它作为 SUB 订阅器填入即可。
+
+可选：`GLOBALPING_TOKEN`（secret，在 globalping.io 免费注册，国内实测额度翻倍）、`VLESS_HOST`（variable，填你 edgetunnel 的自定义域名，初筛更贴近真实）、`PAGES_PROJECT`（variable，自定义 Pages 项目名）。
+
 ## 2026-10-12：国内视角稳定输出（对齐 cmliu 的固定名单思路）
 
 - **edgetunnel 探测和默认订阅不再随机抽样**，固定输出：国内本机实测 ok（按 RTT）→ `manual.txt` 手动置顶 → 不足 `SUB_MIN_NODES`（默认 10）时才用过审池按固定顺序补齐。每次拉取结果一致。`mode=sample` 仍可显式使用。
