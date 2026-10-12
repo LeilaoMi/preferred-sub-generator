@@ -225,7 +225,19 @@ test("edgetunnel probe caps sampled nodes at 30", async () => {
   assert.equal(decoded.split("\n").filter(Boolean).length, 30);
 });
 
-test("edgetunnel probe defaults to cidr sampling without mode param", async () => {
+test("edgetunnel probe uses KV pool by default (cidr is opt-in only)", async () => {
+  const pool = Array.from({ length: 40 }, (_, index) => ({
+    address: `10.0.0.${index + 1}`,
+    port: 443,
+    ports: [443],
+    colo: "LAX",
+    latency: 10,
+  }));
+  const data = new Map([
+    ["TEMPLATE", template],
+    ["BEST_IPS", JSON.stringify(pool)],
+    ["STATUS", JSON.stringify(status)],
+  ]);
   const env = {
     SUB_TOKEN: "test-token",
     SUB_READ_TOKEN: "test-read-token",
@@ -237,9 +249,9 @@ test("edgetunnel probe defaults to cidr sampling without mode param", async () =
     VLESS_TYPE: "ws",
     VLESS_SECURITY: "tls",
     SUB_PUBLIC: "0",
-    SUB_KV: { async get() { return null; }, put() {} },
+    SUB_KV: { async get(key) { return data.get(key) || null; }, put(key, value) { data.set(key, value); } },
   };
-  // 不带 mode 参数的探测：edgetunnel 解析 sub:// 时不透传 mode，服务端默认走 CIDR
+  // 不带 mode 参数的探测：默认走 KV 池（稳定），cidr 必须显式 ?mode=cidr
   const probe = new Request(
     "https://example.com/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000",
     { headers: { "User-Agent": "edgetunnel/2.3.1" } },
@@ -248,9 +260,9 @@ test("edgetunnel probe defaults to cidr sampling without mode param", async () =
   assert.equal(response.status, 200);
   const decoded = Buffer.from(await response.text(), "base64").toString("utf8");
   const lines = decoded.split("\n").filter(Boolean);
-  // CIDR 默认 16 个，不读 KV 也能出节点；节点名不带"实测"（无 KV 评分数据）
-  assert.equal(lines.length, 16);
-  assert.doesNotMatch(decoded, /实测/);
+  // KV 池 40 个 → 探测采样上限 30 个；IP 来自测试池（10.0.0.x）而非 CIDR 段
+  assert.equal(lines.length, 30);
+  assert.match(decoded, /10\.0\.0\./);
 });
 
 test("sub sample mode rotates subsets across requests", async () => {
