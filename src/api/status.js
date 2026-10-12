@@ -1,5 +1,6 @@
 import { jsonResponse } from "../utils/response.js";
 import { readStatus } from "./kv.js";
+import { readHostHealth, summarizeHostHealth } from "./host-health.js";
 
 const STALE_MS = 12 * 60 * 60 * 1000;
 const UNHEALTHY_MS = 24 * 60 * 60 * 1000;
@@ -17,10 +18,30 @@ export async function handleStatus(request, env) {
     const raw = await env.SUB_KV?.get?.("CN_PROBE_STATE");
     if (raw) {
       const parsed = JSON.parse(raw);
-      cnProbe = { lastRunAt: parsed.lastRunAt || null, tested: parsed.tested ?? null, results: parsed.results ?? null, ok: parsed.ok ?? null, rateLimited: Boolean(parsed.rateLimited) };
+      cnProbe = { lastRunAt: parsed.lastRunAt || null, tested: parsed.tested ?? null, results: parsed.results ?? null, ok: parsed.ok ?? null, rateLimited: Boolean(parsed.rateLimited), verified: parsed.verified ?? null, publicVerified: Boolean(parsed.publicVerified) };
     }
   } catch {
     cnProbe = null;
+  }
+  // 国内域名体检（china-host.yml）：每个域名在电信 / 联通 / 移动下的状态 ok | unstable | blocked | unknown
+  let cnHosts = null;
+  try {
+    const health = await readHostHealth(env.SUB_KV);
+    if (health) {
+      cnHosts = {
+        checkedAt: health.checkedAt || null,
+        rotate: Boolean(health.config?.rotate),
+        hosts: summarizeHostHealth(health, health.config?.hosts || null).map((item) => ({
+          host: item.host,
+          blockedIsps: item.blockedIsps,
+          CT: item.isps.CT.state,
+          CU: item.isps.CU.state,
+          CM: item.isps.CM.state,
+        })),
+      };
+    }
+  } catch {
+    cnHosts = null;
   }
   const fallbackActive = Boolean(status.protectedByPrevious);
   const lastError = status.lastError || null;
@@ -48,5 +69,6 @@ export async function handleStatus(request, env) {
     status: semanticStatus,
     // 国内三网自动实测（china-probe.yml）最近一轮概况
     cnProbe,
+    cnHosts,
   });
 }

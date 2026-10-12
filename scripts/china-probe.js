@@ -5,6 +5,7 @@
 //
 // 局限：只测 TCP 握手（RTT + 丢包），测不到 SNI 阻断；国内本机 probe-ips.js 仍是最准的补充。
 import { readKvValue, writeKvValue } from "./lib/kv.js";
+import { buildVerifiedSnapshot, CN_COMMUNITY_KEY, CN_VERIFIED_KEY, mergeSnapshot } from "../src/api/cn-verified.js";
 
 export const CN_PROBE_KEY = "CN_PROBE_FEEDBACK";
 const STATE_KEY = "CN_PROBE_STATE";
@@ -108,12 +109,54 @@ export function mergeEntries(previous, fresh, now = Date.now()) {
   return [...fresh, ...previous].filter((e) => typeof e?.at === "string" && e.at >= since).slice(0, MAX_ENTRIES);
 }
 
-export async function runChinaProbe({ kv, fetchImpl = fetch, token = "", budget = 60, concurrency = 4, now = new Date() }) {
+// 社区实测池：从别人公开的 /cn-verified 拉国内已验证 IP。
+// 用途一：放进本轮待测池优先验证；用途二：存成 CN_COMMUNITY，订阅在自己实测不足时兜底。
+export async function fetchCommunityPool(url, { fetchImpl = fetch, timeoutMs = 10000 } = {}) {
+  if (!url) return null;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const response = await fetchImpl(url, { signal: controller.signal, headers: { "User-Agent": "preferred-sub-generator" } });
+    clearTimeout(timer);
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (!data || !Array.isArray(data.all)) return null;
+    const clean = (list) => (Array.isArray(list) ? list : [])
+      .filter((item) => /^[0-9.]+$/.test(String(item?.address || "")) && Number.isFinite(Number(item?.rtt)))
+      .slice(0, 50)
+      .map((item) => ({ address: item.address, port: Number(item.port) || 443, rtt: Number(item.rtt), colo: String(item.colo || "").slice(0, 4), successRate: item.successRate ?? null }));
+    return { updatedAt: data.updatedAt || null, source: url, all: clean(data.all), CT: clean(data.CT), CU: clean(data.CU), CM: clean(data.CM) };
+  } catch {
+    return null;
+  }
+}
+
+// 用全部国内实测重算快照，够用才覆盖（scripts/china-host-check.js 也调用）
+export async function refreshSnapshot({ kv, fetchImpl, entries, pool, now = Date.now() }) {
+  const raw = await readKvValue({ ...kv, key: CN_VERIFIED_KEY, fetchImpl });
+  let previous = null;
+  try { previous = raw ? JSON.parse(raw) : null; } catch { previous = null; }
+  const snapshot = mergeSnapshot(previous, buildVerifiedSnapshot(entries, pool, { now }));
+  await writeKvValue({ ...kv, key: CN_VERIFIED_KEY, value: JSON.stringify(snapshot), fetchImpl });
+  return snapshot;
+}
+
+export async function runChinaProbe({ kv, fetchImpl = fetch, token = "", budget = 60, concurrency = 4, now = new Date(), communityUrl = "", publicVerified = false, defaultIsp = "" }) {
   const read = async (key) => {
     const raw = await readKvValue({ ...kv, key, fetchImpl });
     try { return raw ? JSON.parse(raw) : null; } catch { return null; }
   };
-  const pool = [...((await read("BEST_IPS")) || []), ...((await read("CN_PENDING_IPS")) || [])];
+  const community = await fetchCommunityPool(communityUrl, { fetchImpl });
+  if (community) {
+    await writeKvValue({ ...kv, key: CN_COMMUNITY_KEY, value: JSON.stringify(community), fetchImpl });
+    console.log(`社区实测池 ${community.all.length} 个（${communityUrl}）`);
+  }
+  const pool = [
+    ...((await read("BEST_IPS")) || []),
+    ...((await read("CN_PENDING_IPS")) || []),
+    // 社区验证过的 IP 当作手动置顶优先测，测通了才算自己的
+    ...(community?.all || []).map((item) => ({ address: item.address, port: item.port, source: "edge-manual" })),
+  ];
   const previous = (await read(CN_PROBE_KEY)) || [];
   const state = (await read(STATE_KEY)) || {};
   const { targets, nextCursor } = pickTargets(pool, previous, Number(state.cursor) || 0, budget);
@@ -139,11 +182,16 @@ export async function runChinaProbe({ kv, fetchImpl = fetch, token = "", budget 
 
   const okCount = fresh.filter((e) => e.ok).length;
   console.log(`得到 ${fresh.length} 条三网结果，可用 ${okCount}`);
+  let verified = null;
   if (fresh.length > 0) {
-    await writeKvValue({ ...kv, key: CN_PROBE_KEY, value: JSON.stringify(mergeEntries(previous, fresh, now.getTime())), fetchImpl });
+    const merged = mergeEntries(previous, fresh, now.getTime());
+    await writeKvValue({ ...kv, key: CN_PROBE_KEY, value: JSON.stringify(merged), fetchImpl });
+    const snapshot = await refreshSnapshot({ kv, fetchImpl, entries: merged, pool, now: now.getTime() });
+    verified = { all: snapshot.all.length, CT: snapshot.CT.length, CU: snapshot.CU.length, CM: snapshot.CM.length };
+    console.log(`国内已验证快照：综合 ${verified.all} / 电信 ${verified.CT} / 联通 ${verified.CU} / 移动 ${verified.CM}`);
   }
-  await writeKvValue({ ...kv, key: STATE_KEY, value: JSON.stringify({ cursor: nextCursor, lastRunAt: at, tested: targets.length, results: fresh.length, ok: okCount, rateLimited }), fetchImpl });
-  return { tested: targets.length, results: fresh.length, ok: okCount, rateLimited };
+  await writeKvValue({ ...kv, key: STATE_KEY, value: JSON.stringify({ publicVerified, defaultIsp: ["CT", "CU", "CM"].includes(String(defaultIsp).toUpperCase()) ? String(defaultIsp).toUpperCase() : null, cursor: nextCursor, lastRunAt: at, tested: targets.length, results: fresh.length, ok: okCount, rateLimited, verified: verified ?? state.verified ?? null, community: community ? community.all.length : null }), fetchImpl });
+  return { tested: targets.length, results: fresh.length, ok: okCount, rateLimited, verified };
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -155,7 +203,13 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const token = process.env.GLOBALPING_TOKEN || "";
   // 匿名额度约 250 次/小时（每个 IP 用 3 次），有 token 时可放大
   const budget = Number(process.env.CN_PROBE_BUDGET) || (token ? 150 : 60);
-  runChinaProbe({ kv, token, budget }).catch((error) => {
+  // 社区实测池默认关闭；填 COMMUNITY_POOL_URL（如 https://yxdy.woniu.bee.al/cn-verified）才拉取
+  const communityUrl = process.env.COMMUNITY_POOL_URL || "";
+  // PUBLIC_CN_VERIFIED=1：公开 /cn-verified，把你的国内已验证 IP 分享给复刻者（只有 IP、延迟、机房，不含域名）
+  const publicVerified = process.env.PUBLIC_CN_VERIFIED === "1";
+  // SUB_DEFAULT_ISP=CT|CU|CM：edgetunnel 拉订阅时默认按这个运营商排序（它的 sub:// 带不了 ?isp=）
+  const defaultIsp = process.env.SUB_DEFAULT_ISP || "";
+  runChinaProbe({ kv, token, budget, communityUrl, publicVerified, defaultIsp }).catch((error) => {
     console.error(`失败: ${error.message}`);
     process.exitCode = 1;
   });

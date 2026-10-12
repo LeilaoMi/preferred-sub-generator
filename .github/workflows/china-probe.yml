@@ -35,3 +35,6 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           GLOBALPING_TOKEN: ${{ secrets.GLOBALPING_TOKEN }}
           CN_PROBE_BUDGET: ${{ vars.CN_PROBE_BUDGET }}
+          COMMUNITY_POOL_URL: ${{ vars.COMMUNITY_POOL_URL }}
+          PUBLIC_CN_VERIFIED: ${{ vars.PUBLIC_CN_VERIFIED }}
+          SUB_DEFAULT_ISP: ${{ vars.SUB_DEFAULT_ISP }}
