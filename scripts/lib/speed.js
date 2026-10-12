@@ -10,7 +10,15 @@ import https from "node:https";
 const SPEED_HOST = "speed.cloudflare.com";
 
 export function downloadSpeed(address, port, { bytes, timeoutMs }) {
-  return new Promise((resolve) => {
+  return new Promise((rawResolve) => {
+    let settled = false;
+    const hardTimer = setTimeout(() => { request.destroy(); resolve(null); }, (Number(timeoutMs) || 10000) * 2 + 2000);
+    function resolve(value) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(hardTimer);
+      rawResolve(value);
+    }
     const request = https.request({
       host: address,
       port,
@@ -41,9 +49,11 @@ export function downloadSpeed(address, port, { bytes, timeoutMs }) {
         resolve(elapsed > 0 ? Math.round(((received * 8) / (elapsed * 1000000)) * 100) / 100 : null);
       });
       response.on("error", () => resolve(null));
+      response.on("close", () => resolve(null));
     });
     request.on("timeout", () => request.destroy(new Error("timeout")));
     request.on("error", () => resolve(null));
+    request.on("close", () => setTimeout(() => resolve(null), 0));
     request.end();
   });
 }
