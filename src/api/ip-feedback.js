@@ -4,6 +4,8 @@ import { jsonResponse } from "../utils/response.js";
 import { ensureD1Schema, hashClientIp } from "./speedtest-db.js";
 
 const FEEDBACK_KEY = "IP_FEEDBACK";
+// GitHub Actions 借 Globalping 国内三网探针自动实测的结果（scripts/china-probe.js 写入）
+const CN_PROBE_KEY = "CN_PROBE_FEEDBACK";
 const KV_MAX_ENTRIES = 500;
 const DEFAULT_DAYS = 14;
 const MAX_DAYS = 90;
@@ -217,8 +219,23 @@ export function summarizeIpScores(entries) {
   return scores;
 }
 
+async function readCnProbeEntries(env, { days, now = Date.now() } = {}) {
+  try {
+    const raw = await env?.SUB_KV?.get?.(CN_PROBE_KEY);
+    if (!raw) return [];
+    const list = JSON.parse(raw);
+    const since = new Date(now - clampDays(days) * 24 * 60 * 60 * 1000).toISOString();
+    return Array.isArray(list) ? list.filter((item) => typeof item?.at === "string" && item.at >= since) : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function loadIpScores(env, options = {}) {
-  const { entries, storage } = await loadIpEntries(env, options);
+  const loaded = await loadIpEntries(env, options);
+  const storage = loaded.storage;
+  // 手机/本机回传 + 国内三网自动实测合并评分
+  const entries = [...loaded.entries, ...(await readCnProbeEntries(env, options))];
   return { scores: summarizeIpScores(entries), storage, count: entries.length };
 }
 
