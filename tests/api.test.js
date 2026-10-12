@@ -665,3 +665,30 @@ test("sub returns machine-readable error code for unsupported type", async () =>
   assert.equal(parsed.code, "UNSUPPORTED_SUBSCRIPTION_TYPE");
   assert.equal(parsed.error, "Unsupported subscription type");
 });
+
+test("待国内验证反代池：只有国内实测 ok 的才进订阅且排最前", async () => {
+  const at = new Date().toISOString();
+  const data = new Map([
+    ["BEST_IPS", JSON.stringify(Array.from({ length: 12 }, (_, i) => ({ address: `10.0.1.${i + 1}`, port: 443, ports: [443], colo: "LAX" })))],
+    ["STATUS", JSON.stringify(status)],
+    ["CN_PENDING_IPS", JSON.stringify([
+      { address: "150.230.1.1", port: 443, ports: [443], source: "cmliu-addresses-csv", pendingCn: true },
+      { address: "150.230.1.2", port: 443, ports: [443], source: "cmliu-addresses-csv", pendingCn: true },
+    ])],
+    ["CN_PROBE_FEEDBACK", JSON.stringify([
+      { at, address: "150.230.1.1", port: 443, rtt: 90, ok: true },
+      { at, address: "150.230.1.1", port: 443, rtt: 110, ok: true },
+    ])],
+  ]);
+  const env = {
+    SUB_TOKEN: "t", SUB_READ_TOKEN: "r", SUB_PUBLIC: "0",
+    VLESS_UUID: "11111111-1111-4111-8111-111111111111", VLESS_SNI: "example.com", VLESS_HOST: "example.com",
+    VLESS_PATH: "/ws", VLESS_PORT: "443", VLESS_TYPE: "ws", VLESS_SECURITY: "tls",
+    SUB_KV: { async get(key) { return data.get(key) || null; }, put(key, value) { data.set(key, value); } },
+  };
+  const probe = new Request("https://example.com/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000", { headers: { "User-Agent": "edgetunnel/2.3.1" } });
+  const decoded = Buffer.from(await (await handleSub(probe, env)).text(), "base64").toString("utf8");
+  const lines = decoded.split("\n").filter(Boolean);
+  assert.match(lines[0], /@150\.230\.1\.1:443/);
+  assert.ok(!decoded.includes("150.230.1.2"), "未验证的反代不能进订阅");
+});

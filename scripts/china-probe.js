@@ -90,7 +90,7 @@ export function pickTargets(pool, previousEntries, cursor, budget) {
   };
   const ipOnly = pool.filter((n) => /^[0-9a-fA-F:.]+$/.test(String(n?.address || "")));
   ipOnly.filter((n) => n.source === "edge-manual").forEach(push);
-  const keepFresh = Math.floor(budget / 2);
+  const keepFresh = Math.floor(budget / 3);
   ipOnly.filter((n) => okBefore.has(n.address)).slice(0, keepFresh).forEach(push);
   const start = ipOnly.length ? cursor % ipOnly.length : 0;
   const rotated = [...ipOnly.slice(start), ...ipOnly.slice(0, start)];
@@ -113,7 +113,7 @@ export async function runChinaProbe({ kv, fetchImpl = fetch, token = "", budget 
     const raw = await readKvValue({ ...kv, key, fetchImpl });
     try { return raw ? JSON.parse(raw) : null; } catch { return null; }
   };
-  const pool = (await read("BEST_IPS")) || [];
+  const pool = [...((await read("BEST_IPS")) || []), ...((await read("CN_PENDING_IPS")) || [])];
   const previous = (await read(CN_PROBE_KEY)) || [];
   const state = (await read(STATE_KEY)) || {};
   const { targets, nextCursor } = pickTargets(pool, previous, Number(state.cursor) || 0, budget);

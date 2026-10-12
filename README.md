@@ -12,7 +12,7 @@
 
 - **edgetunnel 探测和默认订阅不再随机抽样**，固定输出：国内本机实测 ok（按 RTT）→ `manual.txt` 手动置顶 → 不足 `SUB_MIN_NODES`（默认 10）时才用过审池按固定顺序补齐。每次拉取结果一致。`mode=sample` 仍可显式使用。
 - 只采信最近 `SUB_VERIFIED_DAYS`（默认 3）天的实测。
-- **国内三网自动实测（无需手机）**：`.github/workflows/china-probe.yml` 每 3 小时借 [Globalping](https://globalping.io) 的中国大陆电信/联通/移动探针，对过审池做 TCP 443 握手测量（每轮约 60 个 IP，按游标轮转覆盖整池），结果写入 KV `CN_PROBE_FEEDBACK`，与本机回传合并参与排序。可选 secret `GLOBALPING_TOKEN` 提高额度、变量 `CN_PROBE_BUDGET` 调整每轮数量。局限：测不到 SNI 阻断。
+- **国内三网自动实测（无需手机）**：`.github/workflows/china-probe.yml` 每 2 小时借 [Globalping](https://globalping.io) 的中国大陆电信/联通/移动探针，对过审池做 TCP 443 握手测量（每轮约 60 个 IP，按游标轮转覆盖整池），结果写入 KV `CN_PROBE_FEEDBACK`，与本机回传合并参与排序。美国初筛连不上的 cmliu 反代 IP（大多只对国内开放）进入待验证池 `CN_PENDING_IPS`（上限 `CN_PENDING_MAX`，默认 300），只有国内实测 ok 的才进订阅。可选 secret `GLOBALPING_TOKEN` 提高额度、变量 `CN_PROBE_BUDGET` 调整每轮数量。局限：测不到 SNI 阻断。
 - 手机 Termux 实测（可选补充）：见 [docs/termux.md](docs/termux.md)，`bash scripts/termux-probe.sh`（全量过审池、不测带宽、检测到走代理会中止）。
 - `probe-ips.js` 新增 `--pool`（全量实测，最多 300）、`--force`；回传自动分批。
 - **稳定优先，放行反代 IP**：恢复 cmliu 社区源（`addressesapi.txt` / CSV）。这些源基本是 Oracle/AWS/Linode 上的反代 IP，正是 cmliu 在国内稳定的原因，默认放行。流量内容仍是 TLS 端到端加密，但反代方可见连接元数据、可随时失效；介意的话在 GitHub Actions Variables 设 `ALLOW_RELAY=0`，只保留 Cloudflare 官方段 IPv4。

@@ -7,8 +7,8 @@ import { jsonResponse, privateTextResponse, unauthorizedResponse } from "../util
 import { formatEdgeNodeName } from "../utils/colo.js";
 import { loadIpScores } from "./ip-feedback.js";
 import { getNodeConfig, getNodeConfigFromUrl, nodeConfigToTemplate, validateNodeConfig } from "../config/nodes.js";
-import { readBestIps, readBestIpsV6 } from "./kv.js";
-import { filterNodesByColo, parseColoFilter, orderNodesByMeasurement, sampleNodes, selectVerifiedNodes, withPreferredPort } from "./node-filter.js";
+import { readBestIps, readBestIpsV6, readPendingCnIps } from "./kv.js";
+import { filterNodesByColo, isMeasuredOk, parseColoFilter, orderNodesByMeasurement, readRttDropMs, sampleNodes, selectVerifiedNodes, withPreferredPort } from "./node-filter.js";
 import { getPreferredPortOrder } from "../utils/ports.js";
 
 const MAX_NODES = 50;
@@ -129,6 +129,15 @@ export async function handleSub(request, env) {
   if (!rankOff) {
     // 选节点只认最近 SUB_VERIFIED_DAYS 天（默认 3）的国内实测，太旧的实测不代表现在的线路
     ({ scores } = await loadIpScores(env, { days: env.SUB_VERIFIED_DAYS || 3 }));
+    // 待验证反代池里国内实测 ok 的才并入（不在 BEST_IPS 里的）
+    if (!sampleMode && scores && scores.size > 0) {
+      const dropMs = readRttDropMs(env);
+      const known = new Set(nodes.map((node) => node.address));
+      const pending = (await readPendingCnIps(env.SUB_KV))
+        .filter((node) => !known.has(node.address) && isMeasuredOk(scores.get(node.address), dropMs))
+        .map(({ pendingCn, ...node }) => ({ ...node, name: node.address, source: node.source }));
+      nodes = [...nodes, ...pending];
+    }
   }
   // P1-3: SUB_PREFERRED_PORTS 可覆盖端口顺序
   const portOrder = getPreferredPortOrder(env);
