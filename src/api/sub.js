@@ -122,11 +122,32 @@ export async function handleSub(request, env) {
     };
   } else {
     let nodeConfig = getNodeConfigFromUrl(url);
+    // KV 热替换（借鉴 baiyujun/cloudflare-top200-fixed-subscription 的思路，MIT）：
+    // KV 里有 TEMPLATE 时优先用，不用改环境变量、不用重部署
+    if (!nodeConfig && env.SUB_KV) {
+      try {
+        const { readTemplate } = await import("./kv.js");
+        const kvTemplate = await readTemplate(env.SUB_KV).catch(() => null);
+        if (kvTemplate && kvTemplate.uuid) {
+          nodeConfig = {
+            uuid: kvTemplate.uuid,
+            sni: kvTemplate.sni || "",
+            host: kvTemplate.host || "",
+            path: kvTemplate.path || "",
+            port: Number(kvTemplate.port) || 443,
+            type: kvTemplate.type || "ws",
+            security: kvTemplate.security || "tls",
+          };
+        }
+      } catch {
+        // KV 读取失败，继续走环境变量
+      }
+    }
     if (!nodeConfig) {
       try {
         nodeConfig = getNodeConfig(env);
       } catch (error) {
-        return jsonResponse({ error: "缺少节点配置：请在订阅 URL 中携带 uuid/sni/host 等参数，或配置 VLESS_* 环境变量" }, 400);
+        return jsonResponse({ error: "缺少节点配置：请在订阅 URL 中携带 uuid/sni/host 等参数，或配置 VLESS_* 环境变量，或在 KV 中设置 TEMPLATE" }, 400);
       }
     }
     const configWarnings = validateNodeConfig(nodeConfig);
