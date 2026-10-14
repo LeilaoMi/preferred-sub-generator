@@ -35,5 +35,11 @@
     "url": "https://raw.githubusercontent.com/ymyuuu/IPDB/main/BestCF/bestcfv6.txt",
     "type": "text",
     "cfOnly": true
+  },
+  {
+    "name": "cfbestip-sub",
+    "url": "https://bestip.leilaomi.cc.cd/sub?comment=0&top=200",
+    "type": "text",
+    "cfOnly": true
   }
 ]
