@@ -62,11 +62,11 @@ function isZoneServingResponse(buffer) {
   return status >= 200 && status < 300;
 }
 
-function edgeResult(buffer) {
+function edgeResult(buffer, sni) {
   if (!isZoneServingResponse(buffer)) return null;
   const headers = parseHeaders(buffer);
   const colo = parseCfRayColo(headers["cf-ray"]);
-  return { colo, edgeVerified: Boolean(colo) };
+  return { colo, edgeVerified: Boolean(colo), sni };
 }
 
 export function checkHttpEdge(address, port, { host, tlsEnabled, timeoutMs = 5000 } = {}) {
@@ -96,15 +96,15 @@ export function checkHttpEdge(address, port, { host, tlsEnabled, timeoutMs = 500
     socket.on("data", (chunk) => {
       buffer += chunk.toString("utf8");
       if (buffer.includes("\r\n\r\n")) {
-        finish(edgeResult(buffer));
+        finish(edgeResult(buffer, host));
       }
     });
     socket.once("timeout", () => finish(null));
     socket.once("error", () => finish(null));
     // 对端不回包直接关闭（反代 IP 常见）时，之前 promise 永不 resolve，
     // 事件循环清空后整个 update-kv 静默以 0 退出、KV 一个字都没写。
-    socket.once("end", () => finish(buffer ? edgeResult(buffer) : null));
-    socket.once("close", () => finish(buffer ? edgeResult(buffer) : null));
+    socket.once("end", () => finish(buffer ? edgeResult(buffer, host) : null));
+    socket.once("close", () => finish(buffer ? edgeResult(buffer, host) : null));
     const hardTimer = setTimeout(() => finish(null), timeoutMs * 2 + 1000);
     socket.once("close", () => clearTimeout(hardTimer));
   });
