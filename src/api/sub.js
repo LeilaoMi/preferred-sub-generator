@@ -15,6 +15,7 @@ import { getNodeConfig, getNodeConfigFromUrl, nodeConfigToTemplate, validateNode
 import { readBestIps, readBestIpsV6, readPendingCnIps } from "./kv.js";
 import { filterNodesByColo, isMeasuredOk, parseColoFilter, readMinNodes, readRttDropMs, sampleNodes, selectVerifiedNodes, withPreferredPort } from "./node-filter.js";
 import { getPreferredPortOrder, NON_TLS_PORTS } from "../utils/ports.js";
+import { readQuarantine, filterQuarantined } from "./quarantine.js";
 
 const MAX_NODES = 50;
 // 探测旁路给 edgetunnel 的节点上限
@@ -211,6 +212,19 @@ export async function handleSub(request, env) {
       limit: getLimit(url, edgeProbe ? PROBE_MAX_NODES : MAX_NODES),
       env,
     }).map((node) => withPreferredPort(node, portOrder));
+  }
+  // 信誉 quarantine：过滤掉连续失败被隔离的 IP（24h 冷却后自动放回）
+  if (env.SUB_KV) {
+    try {
+      const quarantine = await readQuarantine(env.SUB_KV);
+      const before = nodes.length;
+      nodes = filterQuarantined(nodes, quarantine);
+      if (nodes.length < before) {
+        console.log(`quarantine filtered ${before - nodes.length} nodes`);
+      }
+    } catch {
+      // quarantine 读取失败不阻断
+    }
   }
   // 2026-10-13：TLS 订阅里去掉 80/8080 等非 TLS 端口的节点（反代源偶尔只给 :80，配 TLS 必然握不上手）
   nodes = dropTlsPortMismatch(nodes, template);
