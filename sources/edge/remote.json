@@ -41,5 +41,35 @@
     "url": "https://bestip.leilaomi.cc.cd/sub?comment=0&top=200",
     "type": "text",
     "cfOnly": true
+  },
+  {
+    "name": "uouin",
+    "url": "https://bestcf.pages.dev/uouin/all.txt",
+    "type": "text",
+    "cfOnly": true
+  },
+  {
+    "name": "nirevil",
+    "url": "https://bestcf.pages.dev/nirevil/ipv4.txt",
+    "type": "text",
+    "cfOnly": true
+  },
+  {
+    "name": "s5gy",
+    "url": "https://bestcf.pages.dev/s5gy/all.txt",
+    "type": "text",
+    "cfOnly": true
+  },
+  {
+    "name": "lzj",
+    "url": "https://bestcf.pages.dev/lzj/all.txt",
+    "type": "text",
+    "cfOnly": true
+  },
+  {
+    "name": "xinyitang3",
+    "url": "https://bestcf.pages.dev/xinyitang3/ipv4.txt",
+    "type": "text",
+    "cfOnly": true
   }
 ]
