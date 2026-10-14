@@ -2,6 +2,9 @@ import { generateClashSubscription } from "../generator/clash.js";
 import { generateShadowrocketSubscription } from "../generator/shadowrocket.js";
 import { generateSingboxSubscription } from "../generator/singbox.js";
 import { generateVlessUri } from "../generator/vless.js";
+import { generateSurgeSubscription } from "../generator/surge.js";
+import { generateLoonSubscription } from "../generator/loon.js";
+import { generateStashSubscription } from "../generator/stash.js";
 import { requireReadAuth } from "../security/auth.js";
 import { jsonResponse, privateTextResponse, unauthorizedResponse } from "../utils/response.js";
 import { formatEdgeNodeName } from "../utils/colo.js";
@@ -61,7 +64,9 @@ export function inferTypeFromUa(userAgent) {
   if (!ua) return null;
   if (ua.includes("clash") || ua.includes("mihomo")) return "clash";
   if (ua.includes("sing-box") || ua.includes("singbox")) return "sing-box";
-  if (ua.includes("surge")) return "clash"; // 无原生 surge 分支，最接近的是 clash
+  if (ua.includes("surge")) return "surge";
+  if (ua.includes("loon")) return "loon";
+  if (ua.includes("stash")) return "stash";
   if (ua.includes("shadowrocket")) return "shadowrocket";
   if (ua.includes("v2rayng") || ua.includes("v2ray")) return "v2rayng";
   return null;
@@ -230,6 +235,18 @@ export async function handleSub(request, env) {
 
   if (type === "singbox" || type === "sing-box") {
     return privateTextResponse(generateSingboxSubscription(template, normalizeNodes(nodes), generatorOptions), "application/json; charset=utf-8", subscriptionHeaders("preferred-sub.json"));
+  }
+
+  if (type === "surge") {
+    return privateTextResponse(generateSurgeSubscription(template, normalizeNodes(nodes), generatorOptions), "text/plain; charset=utf-8", subscriptionHeaders("preferred-sub-surge.conf"));
+  }
+
+  if (type === "loon") {
+    return privateTextResponse(generateLoonSubscription(template, normalizeNodes(nodes), generatorOptions), "text/plain; charset=utf-8", subscriptionHeaders("preferred-sub-loon.conf"));
+  }
+
+  if (type === "stash") {
+    return privateTextResponse(generateStashSubscription(template, normalizeNodes(nodes), generatorOptions), "text/yaml; charset=utf-8", subscriptionHeaders("preferred-sub-stash.yaml"));
   }
 
   return jsonResponse(errorPayload("UNSUPPORTED_SUBSCRIPTION_TYPE", "Unsupported subscription type"), 400);
