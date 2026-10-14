@@ -140,3 +140,33 @@ npm run validate:sources  # 检查候选源
 ## 致敬
 
 本项目的节点筛选与输出思路——国内实测、固定名单、反代 IP 兜底稳定性——直接受 [cmliu](https://github.com/cmliu) 的 [edgetunnel](https://github.com/cmliu/edgetunnel) 与 [WorkerVless2sub](https://github.com/cmliu/WorkerVless2sub) 启发，社区优选源也来自 cmliu 及其贡献者的长期维护。感谢 cmliu 和所有为 Cloudflare 优选 IP 生态贡献测速数据的朋友。
+
+## 参考来源
+
+本项目在升级过程中借鉴了以下开源项目的思路与设计（均保留原协议要求）：
+
+| 项目 | 协议 | 借鉴内容 |
+|------|------|---------|
+| [ymyuuu/IPDB](https://github.com/ymyuuu/IPDB) | MIT | 免费优选 IP 数据源（多源聚合的兜底来源之一） |
+| [cmliu/WorkerVless2sub](https://github.com/cmliu/WorkerVless2sub) | Apache-2.0 | 订阅生成器骨架 |
+| [cmliu/Socks2Vlesssub](https://github.com/cmliu/Socks2Vlesssub) | Apache-2.0 | 多源聚合思路 |
+| [bulianglin/psub](https://github.com/bulianglin/psub) | MIT | 隐私保护的订阅转换思路 |
+| [figozhu/Sub-Merger-CFWorker](https://github.com/figozhu/Sub-Merger-CFWorker) | MIT | 节点按规则自动归类到策略组 |
+| [baiqigo/baiqi-cf-worker-mihomo](https://github.com/baiqigo/baiqi-cf-worker-mihomo) | Apache-2.0 | 原生 Mihomo provider 生成 |
+| [xiaolin-007/CloudFlareScan](https://github.com/xiaolin-007/CloudFlareScan) | MIT | 三阶段测速方法 |
+| [byJoey/cfnew-ipdb](https://github.com/byJoey/cfnew-ipdb) | MIT | 结构化 IP 数据库格式 |
+| [myth-li/shadowshuttle](https://github.com/myth-li/shadowshuttle) | MIT | 手机端测速页思路 |
+| [Royo-Qiao/Cloudflare-Edgetunnel](https://github.com/Royo-Qiao/Cloudflare-Edgetunnel) | MIT（自写部分） | SNI 感知 TLS 测速思路 |
+
+以下项目无开源协议，仅借鉴思路、未复用代码：
+
+| 项目 | 借鉴内容 |
+|------|---------|
+| [PAICNI/CFBox](https://github.com/PAICNI/CFBox) | 内部原生多客户端格式生成架构 |
+| [byJoey/cfnew](https://github.com/byJoey/cfnew) | KV 即时生效、三层 IP 来源 |
+| [tianrking/Re_edgetunnel](https://github.com/tianrking/Re_edgetunnel) | 模块化重构思路 |
+| [whypuss/cfnew-ycat](https://github.com/whypuss/cfnew-ycat) | 三层健康检查、信誉 quarantine |
+| [LancelotRar/best-cf-ips](https://github.com/LancelotRar/best-cf-ips) | `IP:端口#国家` 数据格式 |
+| [eooce/Merge-sub](https://github.com/eooce/Merge-sub) | URL 解析重组的 IP 替换方式 |
+
+本项目基于 MIT 协议开源（见 [LICENSE](LICENSE)）。
