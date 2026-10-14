@@ -40,3 +40,25 @@ test("v2rayNG base64 decodes to valid vless URI", () => {
   assert.equal(url.protocol, "vless:");
   assert.equal(url.hostname, "1.1.1.1");
 });
+
+test("Surge output has Proxy section and vless nodes", async () => {
+  const { generateSurgeSubscription } = await import("../src/generator/surge.js");
+  const conf = generateSurgeSubscription(template, nodes);
+  assert.match(conf, /^\[Proxy\]/m);
+  assert.match(conf, /vless, 1\.1\.1\.1, 443/);
+  assert.match(conf, /username=11111111-1111-4111-8111-111111111111/);
+});
+
+test("Loon output has Proxy section and vless nodes", async () => {
+  const { generateLoonSubscription } = await import("../src/generator/loon.js");
+  const conf = generateLoonSubscription(template, nodes);
+  assert.match(conf, /^\[Proxy\]/m);
+  assert.match(conf, /vless,1\.1\.1\.1,443/);
+});
+
+test("Stash output reuses Clash format", async () => {
+  const { generateStashSubscription } = await import("../src/generator/stash.js");
+  const yaml = generateStashSubscription(template, nodes);
+  assert.match(yaml, /^proxies:/m);
+  assert.match(yaml, /^proxy-groups:/m);
+});
