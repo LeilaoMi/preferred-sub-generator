@@ -156,10 +156,14 @@ async function getEffectiveReadTokens(env, now) {
 
 export async function requireReadAuth(request, env, now = Date.now()) {
   // 默认公开模式：SUB_PUBLIC 未设置时即公开；只有明确设为 0/false/no/off 才启用 token 验证
+  // 带了有效只读 token 的请求一律视为已鉴权（public:false），才允许使用服务端节点模板；
+  // 匿名请求在公开模式下放行，但 public:true，调用方不得返回服务端模板里的 UUID/域名。
   const publicDisabled = ["0", "false", "no", "off"].includes(String(env.SUB_PUBLIC || "").toLowerCase());
-  if (!publicDisabled) return { authorized: true, public: true };
-  return authorizeWithTokens(request, env, await getEffectiveReadTokens(env, now), {
+  const tokenAuth = authorizeWithTokens(request, env, await getEffectiveReadTokens(env, now), {
     queryName: "t",
     allowQueryToken: true,
   });
+  if (tokenAuth.authorized) return { authorized: true, public: false };
+  if (!publicDisabled) return { authorized: true, public: true };
+  return tokenAuth;
 }
