@@ -1,8 +1,15 @@
 import fs from "node:fs/promises";
 
 const IPV4 = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}(\/\d{1,2})?(:\d{1,5})?$/;
+const IPV6_BARE = /^[0-9a-f:]+(\/\d{1,3})?$/i;
+const IPV6_BRACKET = /^\[[0-9a-f:]+\](:\d{1,5})?$/i;
 const HOST = /^[a-z0-9.-]+(:\d{1,5})?$/i;
 const FORBIDDEN = /proxyip|socks|nat64|中转|公益/i;
+
+// 与 scripts/lib/candidates.js 保持一致：# 之后是备注（如 cf-termux-pick 的 IP#v4-SJC）
+function stripRemark(line) {
+  return line.split("#")[0].trim();
+}
 
 export function validateManualSource(text) {
   const issues = [];
@@ -17,8 +24,10 @@ export function validateManualSource(text) {
       issues.push(`第 ${lineNumber} 行疑似混入非 Cloudflare Edge 源：${line}`);
       return;
     }
-    if (line.includes(":") && line.includes("[")) return;
-    if (!IPV4.test(line) && !HOST.test(line)) {
+    const addr = stripRemark(line);
+    if (IPV6_BRACKET.test(addr)) return;
+    if (addr.includes(":") && addr.split(":").length > 2 && IPV6_BARE.test(addr)) return;
+    if (!IPV4.test(addr) && !HOST.test(addr)) {
       issues.push(`第 ${lineNumber} 行格式不支持：${line}`);
     }
   });
