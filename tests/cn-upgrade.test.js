@@ -345,3 +345,27 @@ test("TLS 订阅去掉 :80 等非 TLS 端口节点", async () => {
   assert.deepEqual(dropTlsPortMismatch(nodes, { security: "tls" }).map((n) => n.address), ["1.0.0.1"]);
   assert.equal(dropTlsPortMismatch(nodes, { security: "none" }).length, 3);
 });
+
+test("旧实测按年龄加罚：只有一条旧记录的 IP 不再长期霸榜", async () => {
+  const { summarizeIpScores, agePenalty } = await import("../src/api/ip-feedback.js");
+  const now = Date.parse("2026-10-15T12:00:00Z");
+  const entries = [
+    { address: "1.1.1.1", at: "2026-10-13T12:00:00Z", rtt: 150, ok: true },
+    { address: "2.2.2.2", at: "2026-10-15T11:00:00Z", rtt: 160, ok: true },
+  ];
+  const scores = summarizeIpScores(entries, { now });
+  assert.ok(scores.get("1.1.1.1").rank > scores.get("2.2.2.2").rank);
+  assert.equal(agePenalty(48), 40);
+  assert.equal(agePenalty(1000), 60);
+});
+
+test("快照每份名单记录真实生成时间，过期名单不再兜底", async () => {
+  const { mergeSnapshot, snapshotList } = await import("../src/api/cn-verified.js");
+  const item = { address: "1.1.1.1", port: 443, rtt: 100 };
+  const old = mergeSnapshot(null, { updatedAt: "2026-10-01T00:00:00Z", all: Array(12).fill(item), CT: [item], CU: [], CM: [] });
+  const merged = mergeSnapshot(old, { updatedAt: "2026-10-15T00:00:00Z", all: [], CT: [], CU: [], CM: [] });
+  assert.equal(merged.allAt, "2026-10-01T00:00:00Z");
+  const now = Date.parse("2026-10-15T00:00:00Z");
+  assert.equal(snapshotList(merged, null, { now }).length, 0);
+  assert.equal(snapshotList(merged, null, { now, maxAgeMs: 0 }).length, 12);
+});
