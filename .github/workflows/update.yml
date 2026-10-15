@@ -20,6 +20,24 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Pull best IPs from cf-termux-pick
+        uses: actions/checkout@v4
+        with:
+          repository: LeilaoMi/cf-termux-pick
+          token: ${{ secrets.CF_PICK_PAT }}
+          path: cf-termux-pick
+          sparse-checkout: |
+            best-ips.txt
+
+      - name: Sync best-ips to manual source
+        run: |
+          if [ -f cf-termux-pick/best-ips.txt ]; then
+            cp cf-termux-pick/best-ips.txt sources/edge/manual.txt
+            echo "Synced $(wc -l < sources/edge/manual.txt) IPs from cf-termux-pick"
+          else
+            echo "No best-ips.txt found, keeping existing manual.txt"
+          fi
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
