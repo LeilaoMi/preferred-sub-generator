@@ -1,7 +1,7 @@
 import { requireAuthAsync } from "../security/auth.js";
 import { checkRateLimit } from "../security/rate-limit.js";
 import { jsonResponse } from "../utils/response.js";
-import { hashClientIp, insertFeedback, loadFeedback, summarizeFeedback } from "./speedtest-db.js";
+import { hashClientIp, insertFeedback, isD1, loadFeedback, summarizeFeedback } from "./speedtest-db.js";
 
 function getClientIp(request) {
   return request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for")?.split(",")[0].trim() || "unknown";
@@ -37,6 +37,14 @@ export async function handleSpeedtestFeedbackPost(request, env) {
     clientHash: await hashClientIp(clientIp),
   };
 
+  // 没绑 D1 时回退 KV 会每次写一次 KV；匿名请求能把全账号每天 1000 次免费写额度刷光，
+  // 连带 Actions 写 KV 失败。所以 KV 回退只接受管理 token，匿名回传直接跳过。
+  if (!isD1(env)) {
+    const auth = await requireAuthAsync(request, env);
+    if (!auth.authorized) {
+      return jsonResponse({ ok: true, storage: "skipped", note: "未绑定 D1，匿名测速结果不落库" }, 202);
+    }
+  }
   const storage = await insertFeedback(env, entry);
 
   return jsonResponse({
