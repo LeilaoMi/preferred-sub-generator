@@ -16,8 +16,9 @@ import { CN_PROBE_KEY, ispLabel, mergeEntries, refreshSnapshot } from "./china-p
 import { HOST_HEALTH_KEY, mergeHostHealth, resolveCheckHosts, summarizeHostHealth } from "../src/api/host-health.js";
 import { CN_VERIFIED_KEY, SNAPSHOT_ISPS } from "../src/api/cn-verified.js";
 
-const API = "https://api.globalping.io/v1/measurements";
-const ISP_MAGIC = { CT: "CN+Chinanet", CU: "CN+China Unicom", CM: "CN+China Mobile" };
+import { API_BASE, gpHeaders, ispLocation } from "./lib/globalping.js";
+
+const API = `${API_BASE}/measurements`;
 const ALERT_STATE_KEY = "CN_HOST_ALERT_STATE";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -31,7 +32,7 @@ export function parseTrace(body) {
 // 一个 HTTPS 探针结果 -> { isp, ok, colo, ms, tcp, error }
 export function httpResultToCheck(probeResult) {
   const result = probeResult?.result || {};
-  const isp = ispLabel(probeResult?.probe?.network);
+  const isp = ispLabel(probeResult?.probe || {});
   const code = Number(result.statusCode);
   const trace = parseTrace(result.rawBody);
   const timings = result.timings || {};
@@ -50,8 +51,7 @@ export function httpResultToCheck(probeResult) {
 }
 
 async function createHttp({ target, host, locations, fetchImpl, token }) {
-  const headers = { "Content-Type": "application/json" };
-  if (token) headers.Authorization = `Bearer ${token}`;
+  const headers = gpHeaders(token, true);
   const request = { path: "/cdn-cgi/trace", method: "GET" };
   if (host) request.host = host;
   const response = await fetchImpl(API, {
@@ -69,7 +69,7 @@ async function waitMeasurement(id, { fetchImpl, timeoutMs = 40000, pollMs = 1500
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     await sleep(pollMs);
-    const response = await fetchImpl(`${API}/${id}`);
+    const response = await fetchImpl(`${API}/${id}`, { headers: gpHeaders("") });
     const data = await response.json().catch(() => ({}));
     if (data.status && data.status !== "in-progress") return data;
   }
@@ -140,7 +140,7 @@ export async function runHostCheck({ kv, env = {}, fetchImpl = fetch, token = ""
   let rateLimited = false;
 
   // 第一步：域名体检，每个运营商 2 个探针
-  const locations = SNAPSHOT_ISPS.map((isp) => ({ magic: ISP_MAGIC[isp], limit: 2 }));
+  const locations = SNAPSHOT_ISPS.map((isp) => ispLocation(isp, 2));
   const fresh = [];
   for (const host of hosts) {
     if (rateLimited) break;
@@ -174,7 +174,7 @@ export async function runHostCheck({ kv, env = {}, fetchImpl = fetch, token = ""
   for (const target of targets) {
     if (rateLimited) break;
     for (const [host, isps] of Object.entries(groups)) {
-      const { checks, rateLimited: limited } = await measure({ target: target.address, host, locations: isps.map((isp) => ({ magic: ISP_MAGIC[isp], limit: 1 })), fetchImpl, token, pollMs });
+      const { checks, rateLimited: limited } = await measure({ target: target.address, host, locations: isps.map((isp) => ispLocation(isp, 1)), fetchImpl, token, pollMs });
       if (limited) { rateLimited = true; break; }
       for (const check of checks) {
         if (!isps.includes(check.isp) || check.ignore) continue;
