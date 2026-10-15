@@ -1,6 +1,7 @@
 import { jsonResponse } from "../utils/response.js";
 import { readStatus } from "./kv.js";
 import { readHostHealth, summarizeHostHealth } from "./host-health.js";
+import { requireReadAuth } from "../security/auth.js";
 
 const STALE_MS = 12 * 60 * 60 * 1000;
 const UNHEALTHY_MS = 24 * 60 * 60 * 1000;
@@ -11,7 +12,24 @@ function ageMs(updatedAt, now) {
   return Math.max(0, now - ts);
 }
 
+// 匿名访问 /status 时隐藏真实节点域名（只显示 a***.example.com），带只读 token（?t= 或 Bearer）才显示全名
+export function maskHost(host) {
+  const value = String(host || "");
+  const parts = value.split(".");
+  if (parts.length < 2) return "***";
+  const head = parts[0];
+  const tail = parts.slice(-2).join(".");
+  return `${head.slice(0, 1)}***.${tail}`;
+}
+
 export async function handleStatus(request, env) {
+  let showHosts = false;
+  try {
+    const auth = await requireReadAuth(request, env);
+    showHosts = auth.authorized && auth.public === false;
+  } catch {
+    showHosts = false;
+  }
   const status = await readStatus(env.SUB_KV);
   let cnProbe = null;
   try {
@@ -32,7 +50,7 @@ export async function handleStatus(request, env) {
         checkedAt: health.checkedAt || null,
         rotate: Boolean(health.config?.rotate),
         hosts: summarizeHostHealth(health, health.config?.hosts || null).map((item) => ({
-          host: item.host,
+          host: showHosts ? item.host : maskHost(item.host),
           blockedIsps: item.blockedIsps,
           CT: item.isps.CT.state,
           CU: item.isps.CU.state,
