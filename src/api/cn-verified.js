@@ -44,21 +44,34 @@ export function buildVerifiedSnapshot(entries, pool = [], { now = Date.now(), en
   return snapshot;
 }
 
-// 新快照够用才替换；各运营商分别判断，某一网这轮没测够就保留它上一轮的名单
+// 快照里的名单超过这么久没被新实测替换，就不再拿来兜底（默认 7 天）
+export const SNAPSHOT_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
+
+// 新快照够用才替换；各运营商分别判断，某一网这轮没测够就保留它上一轮的名单。
+// 每份名单单独记 `${key}At`（名单真正生成的时间），updatedAt 只表示最近一次合并，不再掩盖旧名单。
 export function mergeSnapshot(previous, fresh, min = SNAPSHOT_MIN) {
-  if (!previous) return fresh;
+  const stamp = (snap, key) => snap?.[`${key}At`] || snap?.updatedAt || null;
+  if (!previous) {
+    const out = { ...fresh };
+    for (const key of ["all", ...SNAPSHOT_ISPS]) out[`${key}At`] = stamp(fresh, key);
+    return out;
+  }
   const out = { updatedAt: fresh.updatedAt };
   for (const key of ["all", ...SNAPSHOT_ISPS]) {
     const next = Array.isArray(fresh[key]) ? fresh[key] : [];
     const old = Array.isArray(previous[key]) ? previous[key] : [];
-    out[key] = next.length >= min || next.length >= old.length ? next : old;
+    const useNext = next.length >= min || next.length >= old.length;
+    out[key] = useNext ? next : old;
+    out[`${key}At`] = useNext ? stamp(fresh, key) : stamp(previous, key);
   }
   return out;
 }
 
-export function snapshotList(snapshot, isp) {
+export function snapshotList(snapshot, isp, { now = Date.now(), maxAgeMs = SNAPSHOT_MAX_AGE_MS } = {}) {
   if (!snapshot || typeof snapshot !== "object") return [];
   const key = isp && SNAPSHOT_ISPS.includes(isp) ? isp : "all";
+  const at = Date.parse(snapshot[`${key}At`] || snapshot.updatedAt || "");
+  if (maxAgeMs > 0 && Number.isFinite(at) && now - at > maxAgeMs) return [];
   const list = Array.isArray(snapshot[key]) ? snapshot[key] : [];
   return list.filter((item) => item && typeof item.address === "string" && Number.isFinite(Number(item.rtt)));
 }
