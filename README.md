@@ -39,9 +39,22 @@ sub://你的部署域名
 
 不要带 `?` 参数，edgetunnel 会把它们丢掉。要按运营商排序，请设置下面的 `SUB_DEFAULT_ISP`。
 
+两个容易踩的坑：
+
+- edgetunnel 面板里的**「随机 IP」开关要关掉**。它默认开着，开着时 edgetunnel 只用自己随机取的 IP，完全不读你填的优选订阅。
+- 不要给 `sub://` 加 `?proxyip=true`。面板的「验证优选 API」可以预览本项目返回的 IP。
+
+本项目对 edgetunnel 的请求永远返回 200（出错时退回最后一次国内验证名单），并缓存 5 分钟，因为 edgetunnel 遇到非 200 会往订阅里塞一个 `127.0.0.1` 的假节点。
+
 edgetunnel 拉取时，本项目返回 30 个 IP，节点参数用占位值（全 0 UUID、`example.com`），不会泄露你的任何信息；edgetunnel 会换上它自己的节点参数。
 
 **客户端请用「自动选择 / url-test」组，不要固定单个节点。** 国内到 Cloudflare 的单个 IP 时好时坏是常态，尤其在 5G 上；自动组会在某个 IP 超时时换到下一个。
+
+## 安全设置
+
+- `/sub` 默认公开，但**匿名请求只能用 URL 里自带的节点参数**；服务端模板（`VLESS_*` 环境变量或 KV 里的 `TEMPLATE`）只对带只读 token（`?t=` 或 `Authorization: Bearer`）的请求生效，不会把 UUID 泄露给陌生人。想彻底关掉匿名访问，设 Pages 环境变量 `SUB_PUBLIC=0`。
+- 网页设置管理 token（`/setup.html`）需要先在 Cloudflare Pages 环境变量里设 `SETUP_CODE`（至少 8 位）并重新部署，设置时填这个码，防止别人抢先设置。直接配 `SUB_TOKEN` 环境变量的不受影响。
+- `/status` 对匿名访问只显示 `1***.example.com` 这样的打码域名，带只读 token 才显示全名。
 
 ## 推荐配置
 
@@ -74,13 +87,13 @@ edgetunnel 拉取时，本项目返回 30 个 IP，节点参数用占位值（�
 
 ## 它怎么工作
 
-四个定时任务（北京时间）：
+四个定时任务（北京时间；GitHub 的定时任务经常推迟几十分钟到几小时）：
 
 | 任务 | 频率 | 做什么 |
 |---|---|---|
-| Update Preferred Subscription | 每天 3:50 / 9:50 / 15:50 / 21:50 | 汇总 Cloudflare 官方段和 cmliu 社区源，美国初筛，写入 KV。美国连不上的反代 IP 进入待验证池，等国内实测 |
+| Update Preferred Subscription | 每 6 小时（约 2:00 / 8:00 / 14:00 / 20:00） | 汇总 Cloudflare 官方段和社区源，美国初筛官方段 IP，写入 KV。cmliu 反代 IP 不做美国初筛，直接进待验证池等国内实测 |
 | China Probe | 每 2 小时 | 国内三网探针对池子做 TCP 443 实测，写入实测记录和**国内已验证快照** |
-| China Host Check | 每 6 小时 | 三网 HTTPS 体检你的域名；对排名前几的 IP 做 IP × 域名组合测，拿到 1034 / 重置 / 落地机房 |
+| China Host Check | 每天 3:50 / 9:50 / 15:50 / 21:50 | 三网 HTTPS 体检你的域名；对排名前几的 IP 做 IP × 域名组合测，拿到 1034 / 重置 / 落地机房 |
 | CI | 每次提交 | 跑全部测试 |
 
 订阅排序规则：
@@ -158,14 +171,13 @@ npm run validate:sources  # 检查候选源
 | [myth-li/shadowshuttle](https://github.com/myth-li/shadowshuttle) | MIT | 手机端测速页思路 |
 | [Royo-Qiao/Cloudflare-Edgetunnel](https://github.com/Royo-Qiao/Cloudflare-Edgetunnel) | MIT（自写部分） | SNI 感知 TLS 测速思路 |
 
-以下项目无开源协议，仅借鉴思路、未复用代码：
+以下项目无开源协议或为 GPL，仅借鉴思路、未复用代码：
 
 | 项目 | 借鉴内容 |
 |------|---------|
 | [PAICNI/CFBox](https://github.com/PAICNI/CFBox) | 内部原生多客户端格式生成架构 |
 | [byJoey/cfnew](https://github.com/byJoey/cfnew) | KV 即时生效、三层 IP 来源 |
-| [tianrking/Re_edgetunnel](https://github.com/tianrking/Re_edgetunnel) | 模块化重构思路 |
-| [whypuss/cfnew-ycat](https://github.com/whypuss/cfnew-ycat) | 三层健康检查、信誉 quarantine |
+| [tianrking/Re_edgetunnel](https://github.com/tianrking/Re_edgetunnel)（GPL-2.0） | 模块化重构思路 |
 | [LancelotRar/best-cf-ips](https://github.com/LancelotRar/best-cf-ips) | `IP:端口#国家` 数据格式 |
 | [eooce/Merge-sub](https://github.com/eooce/Merge-sub) | URL 解析重组的 IP 替换方式 |
 
