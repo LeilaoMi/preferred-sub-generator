@@ -22,7 +22,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 /** 订阅格式名（vless/v2rayng/clash/...）与 VLESS 网络类型（ws/tcp/grpc）共用 `type` 参数名。
  *  2026-10-12 修复：当 `type` 的值是订阅格式名时，它属于订阅格式，不属于节点配置，
  *  节点网络类型回退默认值 ws，避免生成 `vless://...?type=v2rayng` 这种坏链接。 */
-const SUBSCRIPTION_FORMAT_NAMES = new Set([
+export const SUBSCRIPTION_FORMAT_NAMES = new Set([
   "vless", "v2rayng", "base64", "clash", "mihomo", "singbox", "sing-box", "singbox-outbounds", "shadowrocket", "surge", "loon", "stash",
 ]);
 
@@ -31,7 +31,8 @@ export function getNodeConfigFromUrl(url) {
   const params = url.searchParams;
   const uuid = (params.get("uuid") || "").trim();
   if (!uuid) return null; // 没有 uuid 参数，走环境变量兜底
-  const rawType = (params.get("type") || "").trim().toLowerCase();
+  // 传输方式用 net=（type= 是订阅格式，两者撞名会让 type=grpc 被当成未知格式）；旧链接里的 type=grpc 仍兼容
+  const rawType = (params.get("net") || params.get("type") || "").trim().toLowerCase();
   return {
     uuid,
     sni: (params.get("sni") || "").trim(),
