@@ -1,3 +1,4 @@
+import { installFetchTimeout } from "./lib/fetch-timeout.js";
 import { applyInstanceConfig } from "./lib/instance-config.js";
 import fs from "node:fs/promises";
 import { formatEdgeNodeName } from "../src/utils/colo.js";
@@ -175,6 +176,11 @@ function previousFallbackCount(previousStatus) {
   return Number.isFinite(count) && count > 0 ? count : 0;
 }
 
+// 社区反代源：IP 多为 Oracle/AWS 等中转，只对国内来源开放
+export function isRelaySource(source) {
+  return String(source || "").startsWith("cmliu");
+}
+
 export async function buildUpdatePayload({
   nodeConfig,
   manualText,
@@ -209,13 +215,21 @@ export async function buildUpdatePayload({
   const checkParams = {
     host: nodeHost,
     tlsEnabled: nodeSecurity === "tls",
+    // 美国初筛默认 2.5 秒超时、64 并发（原来 5 秒 / 20 并发，单步要 9 分钟）
+    timeoutMs: Number(process.env.CHECK_TIMEOUT_MS) || 2500,
   };
-  const checked = await checkCandidates(candidates, getPortsForSecurity(nodeSecurity, process.env), {
+  // 反代源（cmliu*）在美国几乎都连不上，跳过美国初筛直接进国内待验证池，省掉大半探测时间
+  const usCandidates = candidates.filter((candidate) => !isRelaySource(candidate.source));
+  const startedAt = Date.now();
+  console.log(`US prefilter: ${usCandidates.length} candidates (skipped ${candidates.length - usCandidates.length} relay candidates)`);
+  const checked = await checkCandidates(usCandidates, getPortsForSecurity(nodeSecurity, process.env), {
     checkOne,
     checkOptions: checkParams,
     requireCfRay,
     allowTcpOnly,
+    concurrency: Number(process.env.CHECK_CONCURRENCY) || 64,
   });
+  console.log(`US prefilter done: ${checked.length} reachable in ${Math.round((Date.now() - startedAt) / 1000)}s`);
   const allAggregated = aggregateCheckedResults(checked);
   const aggregated = allAggregated.slice(0, poolLimit);
   // 手动置顶（manual.txt）是你在国内确认能用的 IP/域名：美国扫描机连不上也保留（标记未过审），
@@ -258,7 +272,7 @@ export async function buildUpdatePayload({
     const passed = new Set(nextBestIps.map((item) => item.address));
     for (const candidate of candidates) {
       if (pendingCn.length >= pendingLimit) break;
-      if (candidate.source === "edge-manual" || !String(candidate.source || "").startsWith("cmliu")) continue;
+      if (candidate.source === "edge-manual" || !isRelaySource(candidate.source)) continue;
       if (passed.has(candidate.address) || !/^\d+\.\d+\.\d+\.\d+$/.test(candidate.address)) continue;
       passed.add(candidate.address);
       const port = Number(candidate.port) || 443;
@@ -501,6 +515,7 @@ export async function reportRunFailure(error) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
+  installFetchTimeout();
   applyInstanceConfig();
   // 兜底：main 若因某个永不 resolve 的 promise 挂起，进程会静默 exit 0 而不写 KV；这里改为报错退出
   process.on("beforeExit", (code) => {
