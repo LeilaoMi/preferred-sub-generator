@@ -4,6 +4,7 @@
 // 结果写入 KV 键 CN_PROBE_FEEDBACK，订阅排序与手机 probe-ips.js 回传的数据合并使用。
 //
 // 局限：只测 TCP 握手（RTT + 丢包），测不到 SNI 阻断；国内本机 probe-ips.js 仍是最准的补充。
+import { installFetchTimeout } from "./lib/fetch-timeout.js";
 import { applyInstanceConfig } from "./lib/instance-config.js";
 import { readKvValue, writeKvValue } from "./lib/kv.js";
 import { buildVerifiedSnapshot, CN_COMMUNITY_KEY, CN_VERIFIED_KEY, mergeSnapshot } from "../src/api/cn-verified.js";
@@ -196,6 +197,7 @@ export async function runChinaProbe({ kv, fetchImpl = fetch, token = "", budget 
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
+  installFetchTimeout();
   applyInstanceConfig();
   const kv = {
     accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
