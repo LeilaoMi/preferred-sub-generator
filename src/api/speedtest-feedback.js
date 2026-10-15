@@ -1,7 +1,7 @@
 import { requireAuthAsync } from "../security/auth.js";
 import { checkRateLimit } from "../security/rate-limit.js";
 import { jsonResponse } from "../utils/response.js";
-import { hashClientIp, insertFeedback, isD1, loadFeedback, summarizeFeedback } from "./speedtest-db.js";
+import { hashClientIp, hashSalt, insertFeedback, isD1, loadFeedback, summarizeFeedback } from "./speedtest-db.js";
 
 function getClientIp(request) {
   return request.headers.get("cf-connecting-ip") || request.headers.get("x-forwarded-for")?.split(",")[0].trim() || "unknown";
@@ -34,7 +34,7 @@ export async function handleSpeedtestFeedbackPost(request, env) {
     ipCountry,
     isp,
     speedMbps: Math.round(speedMbps * 100) / 100,
-    clientHash: await hashClientIp(clientIp),
+    clientHash: await hashClientIp(clientIp, hashSalt(env)),
   };
 
   // 没绑 D1 时回退 KV 会每次写一次 KV；匿名请求能把全账号每天 1000 次免费写额度刷光，
