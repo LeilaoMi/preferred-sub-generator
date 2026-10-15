@@ -172,6 +172,16 @@ const DEFAULT_HALF_LIFE_HOURS = 24;
 const NEAR_COLOS = new Set(["HKG", "TPE", "NRT", "HND", "KIX", "ICN", "SIN", "KUL", "BKK", "MNL", "LAX", "SJC", "SFO", "SEA"]);
 const FAR_COLO_PENALTY_MS = 80;
 const RTT_BUCKET_MS = 20;
+// 最近一次成功实测越旧，排序越靠后：每 12 小时 +10ms，最多 +60ms。
+// 只靠半衰期不够——只有一条旧记录的 IP 加权平均后 RTT 不变，会一直排在前面。
+const AGE_STEP_HOURS = 12;
+const AGE_STEP_MS = 10;
+const AGE_MAX_PENALTY_MS = 60;
+
+export function agePenalty(ageHours) {
+  if (!Number.isFinite(ageHours) || ageHours <= 0) return 0;
+  return Math.min(AGE_MAX_PENALTY_MS, Math.floor(ageHours / AGE_STEP_HOURS) * AGE_STEP_MS);
+}
 
 export function isPeakHour(at) {
   const ts = Date.parse(at || "");
@@ -201,7 +211,7 @@ export function stableRank(score) {
   const coloPenalty = colo && !NEAR_COLOS.has(colo) ? FAR_COLO_PENALTY_MS : 0;
   const rate = Number(score?.successRate);
   const failPenalty = Number.isFinite(rate) ? Math.round((1 - rate) * 200) : 0;
-  return bucket + coloPenalty + failPenalty;
+  return bucket + coloPenalty + failPenalty + agePenalty(Number(score?.ageHours));
 }
 
 export function isFarColo(colo) {
@@ -273,6 +283,10 @@ export function summarizeIpScores(entries, options = {}) {
       unreachable: bucket.wFail > bucket.wOk,
       latest: bucket.latest,
     };
+    const latestTs = Date.parse(bucket.latest || "");
+    if (Number.isFinite(options.now) && Number.isFinite(latestTs)) {
+      score.ageHours = Math.round((Math.max(0, options.now - latestTs) / 3600000) * 10) / 10;
+    }
     score.rank = stableRank(score);
     scores.set(address, score);
   }
