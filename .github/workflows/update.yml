@@ -20,22 +20,28 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # cf-termux-pick 已公开，无需 token；拉取失败不阻塞，沿用现有 manual.txt
       - name: Pull best IPs from cf-termux-pick
+        continue-on-error: true
         uses: actions/checkout@v4
         with:
           repository: LeilaoMi/cf-termux-pick
-          token: ${{ secrets.CF_PICK_PAT }}
           path: cf-termux-pick
           sparse-checkout: |
             best-ips.txt
 
       - name: Sync best-ips to manual source
         run: |
-          if [ -f cf-termux-pick/best-ips.txt ]; then
-            cp cf-termux-pick/best-ips.txt sources/edge/manual.txt
-            echo "Synced $(wc -l < sources/edge/manual.txt) IPs from cf-termux-pick"
+          SRC=cf-termux-pick/best-ips.txt
+          DST=sources/edge/manual.txt
+          if [ -s "$SRC" ] && grep -qvE '^\s*(#|$)' "$SRC"; then
+            # 保留 manual.txt 开头的注释说明，只替换 IP 部分
+            grep -E '^\s*#' "$DST" > /tmp/manual.txt || true
+            grep -vE '^\s*(#|$)' "$SRC" >> /tmp/manual.txt
+            mv /tmp/manual.txt "$DST"
+            echo "Synced $(grep -cvE '^\s*(#|$)' "$DST") IPs from cf-termux-pick"
           else
-            echo "No best-ips.txt found, keeping existing manual.txt"
+            echo "No usable best-ips.txt, keeping existing manual.txt"
           fi
 
       - name: Set up Node.js
