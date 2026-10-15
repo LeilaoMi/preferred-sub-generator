@@ -199,7 +199,8 @@ function phoneTime(value) {
 
 export function phoneResultsToEntries(data, now = Date.now()) {
   if (!data || typeof data !== "object" || !Array.isArray(data.ips)) return [];
-  if (data.egress_cn === false) return [];
+  // 只收 v3.4+ 明确判断过出口在国内的结果；老版本没有这个字段，可能是开着 VPN 跑的
+  if (data.egress_cn !== true) return [];
   const topCarrier = String(data.carrier || "").toUpperCase();
   const network = ["wifi", "cellular"].includes(data.network_type) ? data.network_type : "unknown";
   const egress = String(data.egress_hash || "").slice(0, 12);
@@ -303,11 +304,14 @@ export async function runChinaProbe({ kv, fetchImpl = fetch, token = "", budget 
 
   const okCount = fresh.filter((e) => e.ok).length;
   console.log(`得到 ${fresh.length} 条三网结果，可用 ${okCount}`);
-  const phone = dedupePhoneEntries(previous, await fetchPhoneEntries(phoneUrl, { fetchImpl, now: now.getTime() }));
+  // 清掉老版本脚本回传的手机记录（没有出口哈希，无法确认是不是开着 VPN 测的）
+  const kept = previous.filter((e) => !/^phone:[^:]*:$/.test(String(e?.clientHash || "")));
+  if (kept.length !== previous.length) console.log(`清除 ${previous.length - kept.length} 条老版本手机记录`);
+  const phone = dedupePhoneEntries(kept, await fetchPhoneEntries(phoneUrl, { fetchImpl, now: now.getTime() }));
   if (phoneUrl) console.log(`手机实测新增 ${phone.length} 条`);
   let verified = null;
-  if (fresh.length > 0 || phone.length > 0) {
-    const merged = mergeEntries(previous, [...fresh, ...phone], now.getTime());
+  if (fresh.length > 0 || phone.length > 0 || kept.length !== previous.length) {
+    const merged = mergeEntries(kept, [...fresh, ...phone], now.getTime());
     await writeKvValue({ ...kv, key: CN_PROBE_KEY, value: JSON.stringify(merged), fetchImpl });
     const snapshot = await refreshSnapshot({ kv, fetchImpl, entries: merged, pool, now: now.getTime() });
     verified = { all: snapshot.all.length, CT: snapshot.CT.length, CU: snapshot.CU.length, CM: snapshot.CM.length };
