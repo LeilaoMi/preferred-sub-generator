@@ -133,7 +133,10 @@ edgetunnel 拉取时，本项目返回 30 个 IP，节点参数用占位值（�
 
 ## 其他用法
 
-- **直接订阅（不经过 edgetunnel）**：`/sub?type=clash|singbox|v2rayng|shadowrocket`，需要只读 token，可加 `?isp=cu` 选运营商。
+- **直接订阅（不经过 edgetunnel）**：`/sub?type=clash|stash|singbox|surge|loon|v2rayng|shadowrocket`，需要只读 token，可加 `?isp=cu` 选运营商。不带 `type` 时按客户端 UA 自动识别。
+  - `singbox` 输出 sing-box 1.12+ 可直接导入的完整配置；只要出站列表用 `singbox-outbounds`。
+  - Surge 不支持 VLESS，`surge` 输出的是 Trojan over WebSocket（edgetunnel 同一路径接受 Trojan，密码就是 UUID）。
+  - 只支持 WebSocket 传输的节点。
 - **手机实测**：[docs/termux.md](docs/termux.md)
 - **完整 API、环境变量、历史设计**：[docs/reference.md](docs/reference.md)
 - **Cloudflare 手动配置**：[docs/cloudflare-setup.md](docs/cloudflare-setup.md)
