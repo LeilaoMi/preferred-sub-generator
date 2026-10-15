@@ -57,6 +57,8 @@ edgetunnel 拉取时，本项目返回 30 个 IP，节点参数用占位值（�
 - `/sub` 默认公开，但**匿名请求只能用 URL 里自带的节点参数**；服务端模板（`VLESS_*` 环境变量或 KV 里的 `TEMPLATE`）只对带只读 token（`?t=` 或 `Authorization: Bearer`）的请求生效，不会把 UUID 泄露给陌生人。想彻底关掉匿名访问，设 Pages 环境变量 `SUB_PUBLIC=0`。
 - 网页设置管理 token（`/setup.html`）需要先在 Cloudflare Pages 环境变量里设 `SETUP_CODE`（至少 8 位）并重新部署，设置时填这个码，防止别人抢先设置。直接配 `SUB_TOKEN` 环境变量的不受影响。
 - `/status` 对匿名访问只显示 `1***.example.com` 这样的打码域名，带只读 token 才显示全名。
+- 测速反馈里的访客 IP 只存加盐哈希（盐取 `IP_HASH_SALT`，没配就用 `SUB_TOKEN`），没法穷举反查。
+- 静态页面自带 `_headers`：禁止被 iframe 嵌入，并带 CSP。
 
 ## 推荐配置
 
@@ -83,6 +85,7 @@ edgetunnel 拉取时，本项目返回 30 个 IP，节点参数用占位值（�
 | `EDGE_BLACKLIST` | Variable | 额外拉黑的网段，逗号分隔 CIDR |
 | `PUBLIC_CN_VERIFIED` | Variable | `1`：公开 `/cn-verified`，只含 IP、端口、延迟、成功率、机房 |
 | `COMMUNITY_POOL_URL` | Variable | 用别人公开的 `/cn-verified` 做冷启动，永远排在自己数据之后 |
+| `PHONE_RESULTS_URL` | Variable | 手机实测结果的地址，默认 `https://raw.githubusercontent.com/你的用户名/cf-termux-pick/main/best-ips.json`，仓库不存在就自动跳过 |
 | `TG_BOT_TOKEN` + `TG_CHAT_ID` / `BARK_URL` / `UPDATE_WEBHOOK_URL` | Secret | 可选告警：域名被墙、某网可用节点不足、恢复时推送，同样内容 24 小时只推一次 |
 
 </details>
@@ -94,13 +97,13 @@ edgetunnel 拉取时，本项目返回 30 个 IP，节点参数用占位值（�
 | 任务 | 频率 | 做什么 |
 |---|---|---|
 | Update Preferred Subscription | 每 6 小时（约 2:00 / 8:00 / 14:00 / 20:00） | 汇总 Cloudflare 官方段和社区源，美国初筛官方段 IP，写入 KV。cmliu 反代 IP 不做美国初筛，直接进待验证池等国内实测 |
-| China Probe | 每 2 小时 | 国内三网探针对池子做 TCP 443 实测，写入实测记录和**国内已验证快照** |
+| China Probe | 每 2 小时 | 国内三网探针对池子做 TCP 实测（反代 IP 改做 HTTPS `/cdn-cgi/trace`，能到 Cloudflare 才算通），并入手机实测，写入实测记录和**国内已验证快照** |
 | China Host Check | 每天 3:50 / 9:50 / 15:50 / 21:50 | 三网 HTTPS 体检你的域名；对排名前几的 IP 做 IP × 域名组合测，拿到 1034 / 重置 / 落地机房 |
 | CI | 每次提交 | 跑全部测试 |
 
 订阅排序规则：
 
-1. 只采信最近 3 天的国内实测，24 小时半衰期，北京时间 20–23 点晚高峰的实测权重 ×1.5。
+1. 只采信最近 3 天的国内实测，24 小时半衰期，北京时间 20–23 点晚高峰的实测权重 ×1.5。手机 [cf-termux-pick](https://github.com/LeilaoMi/cf-termux-pick) 回传的实测也算：WiFi（自家宽带）×1.5，5G/4G ×1.2；开着 VPN 跑出来的结果不收。
 2. 延迟按 20ms 分档，失败率加罚，落地在香港、台湾、日本、新加坡、美西加分，绕到欧洲、美东加罚 80ms。
 3. 最近一次成功实测越旧越靠后（每 12 小时加罚 10ms，最多 60ms）；国内快照里的名单超过 7 天没更新就不再用来兜底。
 4. 国内实测 ok 的排前面，然后是 `sources/edge/manual.txt` 里的手动置顶，不足 10 个再用过审池补齐。
