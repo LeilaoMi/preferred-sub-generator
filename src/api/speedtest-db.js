@@ -42,7 +42,7 @@ export async function hashClientIp(ip) {
   return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("").slice(0, 16);
 }
 
-function isD1(env) {
+export function isD1(env) {
   return Boolean(env?.SPEED_DB);
 }
 
