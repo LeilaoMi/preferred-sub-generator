@@ -1,33 +1,42 @@
+import { iniName, nodeName, TEST_URL } from "./common.js";
+
+// Loon VLESS 语法（nsloon.app/docs/Node）：
+// 名称 = VLESS,服务器,端口,"UUID",transport=ws,path=/,host=域名,over-tls=true,sni=域名,skip-cert-verify=false
 function buildProxy(template, override, index) {
   const node = { ...template, ...override };
-  const name = node.name || `优选-${index + 1}`;
+  const name = iniName(nodeName(node, index));
   const tls = node.security === "tls";
   const parts = [
-    name,
-    "vless",
+    "VLESS",
     node.address,
-    String(node.port || 443),
-    node.uuid,
-    "ws:true",
-    `ws-path:${node.path || "/"}`,
+    String(Number(node.port) || 443),
+    `"${node.uuid}"`,
+    "transport=ws",
+    `path=${node.path || "/"}`,
   ];
-  if (node.host) parts.push(`ws-headers:Host:${node.host}`);
+  if (node.host) parts.push(`host=${node.host}`);
+  parts.push(`over-tls=${tls}`);
   if (tls) {
-    parts.push("over-tls:true");
-    if (node.sni) parts.push(`tls-name:${node.sni}`);
+    const sni = node.sni || node.host;
+    if (sni) parts.push(`sni=${sni}`);
+    parts.push("skip-cert-verify=false");
   }
-  return parts.join(",");
+  parts.push("udp=true");
+  return { name, line: `${name} = ${parts.join(",")}` };
 }
 
 export function generateLoonSubscription(template, nodes, options = {}) {
   const proxies = nodes.map((node, index) => buildProxy(template, node, index));
-  const names = nodes.map((node, index) => node.name || `优选-${index + 1}`);
-
-  const lines = ["[Proxy]", ...proxies, ""];
-  // Loon 用策略组做自动选择
-  if (options.autoTest && proxies.length > 0) {
-    lines.push("[Remote Proxy]");
+  const names = proxies.map((proxy) => proxy.name);
+  const lines = ["[Proxy]", ...proxies.map((proxy) => proxy.line), "", "[Proxy Group]"];
+  if (names.length === 0) {
+    lines.push("优选自动 = select,DIRECT");
+  } else if (options.autoTest) {
+    lines.push(`自动测速 = url-test,${names.join(",")},url=${TEST_URL},interval=300,tolerance=80`);
+    lines.push(`优选自动 = select,自动测速,${names.join(",")}`);
+  } else {
+    lines.push(`优选自动 = select,${names.join(",")}`);
   }
-  lines.push("[Proxy Group]", `优选自动 = select, ${names.join(", ")}`, "", "[Rule]", "FINAL,优选自动", "");
+  lines.push("", "[Rule]", "FINAL,优选自动", "");
   return lines.join("\n");
 }
