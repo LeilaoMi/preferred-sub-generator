@@ -366,9 +366,10 @@ test("ip feedback D1 migration degrades when the ok column cannot be ensured", a
     results: [{ address: "1.1.1.9", rtt: 7, ok: false }],
   }), createEnv({ SPEED_DB: broken }));
   assert.equal(brokenPost.status, 200);
-  assert.equal(broken.rows[0].ok, undefined);
+  // 没有 ok 列时失败记录不写（写进去会变成 rtt 的"成功"）
+  assert.equal(broken.rows.length, 0);
   const brokenScores = (await loadIpScores({ SPEED_DB: broken })).scores;
-  assert.equal(brokenScores.get("1.1.1.9").unreachable, false);
+  assert.equal(brokenScores.has("1.1.1.9"), false);
 });
 
 test("best reorders nodes by measured rtt and reports measurement count", async () => {
