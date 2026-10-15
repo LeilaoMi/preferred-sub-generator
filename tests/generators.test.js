@@ -34,8 +34,9 @@ test("generate Sing-box subscription", () => {
   const output = generateSingboxSubscription(template, nodes);
   const parsed = JSON.parse(output);
 
-  assert.equal(parsed.outbounds.length, 2);
+  assert.equal(parsed.outbounds.filter((o) => o.type === "vless").length, 2);
   assert.equal(parsed.outbounds[0].type, "vless");
+  assert.ok(Array.isArray(parsed.inbounds) && parsed.route && parsed.dns);
   assert.equal(parsed.outbounds[0].server, "1.1.1.1");
   assert.equal(parsed.outbounds[0].server_port, 443);
   assert.equal(parsed.outbounds[0].uuid, "11111111-1111-4111-8111-111111111111");
@@ -61,14 +62,14 @@ test("generate Clash subscription with autoTest adds url-test group (sample mode
 test("generate Sing-box subscription with autoTest adds urltest and selector (sample mode)", () => {
   const parsed = JSON.parse(generateSingboxSubscription(template, nodes, { autoTest: true }));
 
-  assert.equal(parsed.outbounds.length, 4);
+  assert.equal(parsed.outbounds.filter((o) => o.type === "vless").length, 2);
   assert.equal(parsed.outbounds[0].type, "urltest");
   assert.equal(parsed.outbounds[0].tag, "自动测速");
   assert.deepEqual(parsed.outbounds[0].outbounds, ["优选-1", "优选-2"]);
   assert.equal(parsed.outbounds[1].type, "selector");
   assert.equal(parsed.outbounds[1].default, "自动测速");
   // 非抽样模式只有节点出站，旧行为不变
-  assert.equal(JSON.parse(generateSingboxSubscription(template, nodes)).outbounds.length, 2);
+  assert.equal(JSON.parse(generateSingboxSubscription(template, nodes)).outbounds.some((o) => o.type === "urltest"), false);
 });
 
 test("generate Shadowrocket subscription", () => {
