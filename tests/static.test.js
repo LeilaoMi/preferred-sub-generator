@@ -51,11 +51,10 @@ test("deploy checklist contains required secrets and safety checks", async () =>
   assert.match(checklist, /只读访问/);
 });
 
-
-test("nested admin page escapes preview values before rendering", async () => {
-  const html = await fs.readFile(new URL("../public/admin/index.html", import.meta.url), "utf8");
-
-  assert.match(html, /function escapeHtml/);
-  assert.match(html, /escapeHtml\(preview\[key\] \|\| "-"\)/);
-  assert.doesNotMatch(html, /<div class="value">\$\{preview\[key\] \|\| "-"\}<\/div>/);
+test("static pages ship security headers and the legacy nested admin page is gone", async () => {
+  const headers = await fs.readFile(new URL("../public/_headers", import.meta.url), "utf8");
+  assert.match(headers, /frame-ancestors 'none'/);
+  assert.match(headers, /X-Content-Type-Options: nosniff/);
+  await assert.rejects(fs.access(new URL("../public/admin/index.html", import.meta.url)));
 });
+
