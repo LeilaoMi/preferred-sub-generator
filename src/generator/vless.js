@@ -14,6 +14,8 @@ export function generateVlessUri(template, overrides = {}) {
   if (node.host) params.set("host", node.host);
   if (node.sni) params.set("sni", node.sni);
   if (node.path) params.set("path", node.path);
+  if (!params.has("encryption")) params.set("encryption", "none");
+  if (node.security === "tls" && !params.has("fp")) params.set("fp", "chrome");
 
   const port = node.port ? `:${node.port}` : "";
   const query = params.toString();
