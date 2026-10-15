@@ -278,7 +278,7 @@
       if (config.host) url.searchParams.set("host", config.host);
       if (config.path) url.searchParams.set("path", config.path);
       if (config.port && config.port !== 443) url.searchParams.set("port", String(config.port));
-      if (config.type && config.type !== "ws") url.searchParams.set("type", config.type);
+      if (config.type && config.type !== "ws") url.searchParams.set("net", config.type);
       if (config.security && config.security !== "tls") url.searchParams.set("security", config.security);
       return url.toString();
     }
