@@ -749,3 +749,10 @@ test("maskHost keeps only the first character and the registrable suffix", async
   assert.equal(maskHost("1.leilaomi.ccwu.cc"), "1***.ccwu.cc");
   assert.equal(maskHost("localhost"), "***");
 });
+
+test("子域名 ct./cu./cm. 决定运营商", async () => {
+  const { ispFromHost } = await import("../src/api/sub.js");
+  assert.equal(ispFromHost("ct.yxdy.example.com"), "CT");
+  assert.equal(ispFromHost("yd.example.com"), "CM");
+  assert.equal(ispFromHost("yxdy.example.com"), null);
+});
