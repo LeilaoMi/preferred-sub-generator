@@ -612,3 +612,23 @@ test("手动置顶条目扫描不过审也保留在池里", async () => {
   assert.equal(pinned.edgeVerified, false);
   assert.equal(pinned.source, "edge-manual");
 });
+
+test("cfOnly 源始终只保留官方段，不受 ALLOW_RELAY 影响；无 cfOnly 的反代源在 ALLOW_RELAY 默认时保留", async () => {
+  const { collectCandidatesWithHealth } = await import("../scripts/lib/candidates.js");
+  const bodies = {
+    "https://a.example/cf.txt": "104.16.1.1:443\n43.161.228.229:443\n",
+    "https://a.example/relay.txt": "150.230.206.130:443#JP\n",
+  };
+  const fetchImpl = async (url) => new Response(bodies[url] || "", { status: 200 });
+  const remoteSources = [
+    { name: "tg-source", url: "https://a.example/cf.txt", type: "text", cfOnly: true },
+    { name: "cmliu-addressesapi", url: "https://a.example/relay.txt", type: "text" },
+  ];
+  const { candidates } = await collectCandidatesWithHealth({ remoteSources, fetchImpl, allowRelay: true });
+  const addrs = candidates.map((c) => c.address);
+  assert.ok(addrs.includes("104.16.1.1"));
+  assert.ok(!addrs.includes("43.161.228.229"));
+  assert.ok(addrs.includes("150.230.206.130"));
+  const strict = await collectCandidatesWithHealth({ remoteSources, fetchImpl, allowRelay: false });
+  assert.ok(!strict.candidates.map((c) => c.address).includes("150.230.206.130"));
+});
