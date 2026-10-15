@@ -37,8 +37,14 @@ export function clampOptions({ days, limit } = {}) {
   };
 }
 
-export async function hashClientIp(ip) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(String(ip || "unknown")));
+// 加盐：IPv4 只有 43 亿个，不加盐的 SHA-256 前缀可以穷举反查出访客 IP。
+// 盐取 IP_HASH_SALT，没配就用已有的 SUB_TOKEN（部署者私有、别人拿不到），都没有时退回不加盐。
+export function hashSalt(env = {}) {
+  return String(env?.IP_HASH_SALT || env?.SUB_TOKEN || "");
+}
+
+export async function hashClientIp(ip, salt = "") {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${salt}|${String(ip || "unknown")}`));
   return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("").slice(0, 16);
 }
 
