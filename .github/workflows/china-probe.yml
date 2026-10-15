@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"
       - name: 自动定位 KV 命名空间
         run: node scripts/cf-bootstrap.js
         env:
@@ -38,3 +38,5 @@ jobs:
           COMMUNITY_POOL_URL: ${{ vars.COMMUNITY_POOL_URL }}
           PUBLIC_CN_VERIFIED: ${{ vars.PUBLIC_CN_VERIFIED }}
           SUB_DEFAULT_ISP: ${{ vars.SUB_DEFAULT_ISP }}
+          # 手机 cf-termux-pick 的结构化结果；仓库不存在时 404，自动跳过
+          PHONE_RESULTS_URL: ${{ vars.PHONE_RESULTS_URL || format('https://raw.githubusercontent.com/{0}/cf-termux-pick/main/best-ips.json', github.repository_owner) }}
