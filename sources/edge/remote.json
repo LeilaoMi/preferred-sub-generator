@@ -51,5 +51,26 @@
     "url": "https://bestcf.pages.dev/s5gy/all.txt",
     "type": "text",
     "cfOnly": true
+  },
+  {
+    "name": "seed-cidr-ct",
+    "url": "https://raw.githubusercontent.com/cmliu/cmliu/main/CF-CIDR/ct.txt",
+    "type": "text",
+    "cidrSamples": 4,
+    "cfOnly": true
+  },
+  {
+    "name": "seed-cidr-cu",
+    "url": "https://raw.githubusercontent.com/cmliu/cmliu/main/CF-CIDR/cu.txt",
+    "type": "text",
+    "cidrSamples": 4,
+    "cfOnly": true
+  },
+  {
+    "name": "seed-cidr-cmcc",
+    "url": "https://raw.githubusercontent.com/cmliu/cmliu/main/CF-CIDR/cmcc.txt",
+    "type": "text",
+    "cidrSamples": 4,
+    "cfOnly": true
   }
 ]
