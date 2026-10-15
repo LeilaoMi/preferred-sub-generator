@@ -10,6 +10,13 @@ import { readKvValue, writeKvValue } from "./lib/kv.js";
 import { buildVerifiedSnapshot, CN_COMMUNITY_KEY, CN_VERIFIED_KEY, mergeSnapshot } from "../src/api/cn-verified.js";
 import { adaptBudget, API_BASE, cnLocations, gpHeaders, ispFromNetwork, ispFromProbe, readRemainingCredits } from "./lib/globalping.js";
 import { NON_TLS_PORTS } from "../src/utils/ports.js";
+import { httpResultToCheck } from "./china-host-check.js";
+
+// 反代 IP 验证用的 SNI/Host：优先你的节点域名，没配就用 speed.cloudflare.com（能回 trace 就说明转发到了 CF）
+// 运行时再读：instance.json 里的 VLESS_HOST 由 applyInstanceConfig 在启动后注入
+export function relayCheckHost(env = process.env) {
+  return String(env.VLESS_SNI || env.VLESS_HOST || "").trim() || "speed.cloudflare.com";
+}
 
 export const CN_PROBE_KEY = "CN_PROBE_FEEDBACK";
 const STATE_KEY = "CN_PROBE_STATE";
@@ -29,6 +36,7 @@ export function ispLabel(networkOrProbe) {
 
 // 一个探针结果 -> 一条反馈；丢包超过 1/3 或没回包都算失败
 export function resultToEntry(target, result, at) {
+  if (target.relay) return relayResultToEntry(target, result, at);
   const stats = result?.result?.stats;
   const status = result?.result?.status;
   const total = Number(stats?.total) || 0;
@@ -48,17 +56,51 @@ export function resultToEntry(target, result, at) {
   };
 }
 
+// HTTPS 组合测结果 -> 实测记录。RTT 取 TCP 建连耗时，和 TCP ping 口径一致
+export function relayResultToEntry(target, result, at) {
+  const check = httpResultToCheck(result);
+  // Globalping 自己的探针超时，不是目标的问题，不记
+  if (check.ignore) return null;
+  const ok = Boolean(check.ok) && Number.isFinite(check.tcp);
+  return {
+    at,
+    address: target.address,
+    port: target.port,
+    colo: check.colo || "",
+    region: `CN-${ispLabel(result?.probe || {})}`,
+    rtt: ok ? Math.round(check.tcp * 10) / 10 : null,
+    speed: null,
+    clientHash: `globalping-https:${result?.probe?.asn || "?"}:${result?.probe?.city || "?"}`,
+    ok,
+  };
+}
+
 // locations 可以是位置数组，也可以是上一次测量的 id（Globalping 会复用同一批探针）
+// 反代 IP 只 TCP ping 通不够：端口开着但转发不到 Cloudflare 的机器很常见。
+// 对它们改发 HTTPS GET /cdn-cgi/trace（request.host 同时用作 SNI），拿到 Cloudflare 的 trace 才算 ok。
+// 额度和 ping 一样，每个探针 1 次。
+export function measurementBody(target, locations, relayHost = relayCheckHost()) {
+  if (target.relay) {
+    return {
+      type: "http",
+      target: target.address,
+      measurementOptions: { protocol: "HTTPS", port: target.port, request: { host: relayHost, path: "/cdn-cgi/trace", method: "GET" } },
+      locations,
+    };
+  }
+  return {
+    type: "ping",
+    target: target.address,
+    measurementOptions: { protocol: "TCP", port: target.port, packets: 3 },
+    locations,
+  };
+}
+
 async function createMeasurement(target, { fetchImpl, token, locations = ISP_LOCATIONS }) {
   const response = await fetchImpl(API, {
     method: "POST",
     headers: gpHeaders(token, true),
-    body: JSON.stringify({
-      type: "ping",
-      target: target.address,
-      measurementOptions: { protocol: "TCP", port: target.port, packets: 3 },
-      locations,
-    }),
+    body: JSON.stringify(measurementBody(target, locations)),
   });
   if (response.status === 429) return { rateLimited: true };
   const data = await response.json().catch(() => ({}));
@@ -85,7 +127,8 @@ export function pickTargets(pool, previousEntries, cursor, budget, { skipPorts =
   const push = (node) => {
     if (out.length >= budget || seen.has(node.address)) return;
     seen.add(node.address);
-    out.push({ address: node.address, port: Number(node.port) || 443 });
+    // 反代 IP（待验证池）要多验一层：TCP 通不等于能到 CF，见 createMeasurement
+    out.push({ address: node.address, port: Number(node.port) || 443, ...(node.pendingCn ? { relay: true } : {}) });
   };
   // 只测 IP；非 TLS 端口（80/8080…）进不了 TLS 订阅，测了白耗额度
   const badPorts = new Set(skipPorts);
@@ -141,7 +184,70 @@ export async function refreshSnapshot({ kv, fetchImpl, entries, pool, now = Date
   return snapshot;
 }
 
-export async function runChinaProbe({ kv, fetchImpl = fetch, token = "", budget = 60, concurrency = 4, now = new Date(), communityUrl = "", publicVerified = false, defaultIsp = "" }) {
+// 手机实测（cf-termux-pick 的 best-ips.json）：真实用户线路，和 Globalping 家宽探针一起参与三网排序。
+// 只收出口在国内、认出了运营商的结果；开着 VPN 跑的（egress_cn=false）测的是代理线路，丢掉。
+const PHONE_KEEP_MS = 3 * 24 * 3600 * 1000;
+
+function phoneTime(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  // Python 的 %z 是 +0800，JS 要 +08:00；没带时区的按北京时间
+  const fixed = text.replace(/([+-]\d{2})(\d{2})$/, "$1:$2");
+  const ts = Date.parse(/[zZ]|[+-]\d{2}:\d{2}$/.test(fixed) ? fixed : `${fixed}+08:00`);
+  return Number.isFinite(ts) ? new Date(ts).toISOString() : null;
+}
+
+export function phoneResultsToEntries(data, now = Date.now()) {
+  if (!data || typeof data !== "object" || !Array.isArray(data.ips)) return [];
+  if (data.egress_cn === false) return [];
+  const topCarrier = String(data.carrier || "").toUpperCase();
+  const network = ["wifi", "cellular"].includes(data.network_type) ? data.network_type : "unknown";
+  const egress = String(data.egress_hash || "").slice(0, 12);
+  const since = now - PHONE_KEEP_MS;
+  const out = [];
+  for (const item of data.ips) {
+    const address = String(item?.ip || "");
+    if (!/^\d+\.\d+\.\d+\.\d+$/.test(address)) continue;
+    const carrier = String(item?.carrier || topCarrier).toUpperCase();
+    if (!["CT", "CU", "CM"].includes(carrier)) continue;
+    const rtt = Number(item?.latency_ms);
+    if (!Number.isFinite(rtt) || rtt <= 0) continue;
+    const at = phoneTime(item?.measured_at || data.updated);
+    if (!at || Date.parse(at) < since || Date.parse(at) > now + 3600000) continue;
+    out.push({
+      at,
+      address,
+      port: Number(item?.port) || 443,
+      colo: /^[A-Z]{3}$/.test(String(item?.colo || "")) ? item.colo : "",
+      region: `CN-${carrier}`,
+      rtt: Math.round(rtt * 10) / 10,
+      speed: null,
+      clientHash: `phone:${network}:${egress}`.slice(0, 32),
+      ok: true,
+    });
+  }
+  return out;
+}
+
+export async function fetchPhoneEntries(url, { fetchImpl = fetch, now = Date.now() } = {}) {
+  if (!url) return [];
+  try {
+    const response = await fetchImpl(url, { headers: { "User-Agent": "preferred-sub-generator" } });
+    if (!response.ok) return [];
+    return phoneResultsToEntries(await response.json(), now);
+  } catch {
+    return [];
+  }
+}
+
+// 同一次手机实测会被每轮重复拉到，按（地址, 时间, 来源）去重
+export function dedupePhoneEntries(previous, phone) {
+  const key = (e) => `${e.address}|${e.at}|${e.clientHash}`;
+  const seen = new Set(previous.filter((e) => String(e?.clientHash || "").startsWith("phone:")).map(key));
+  return phone.filter((e) => !seen.has(key(e)));
+}
+
+export async function runChinaProbe({ kv, fetchImpl = fetch, token = "", budget = 60, concurrency = 4, now = new Date(), communityUrl = "", publicVerified = false, defaultIsp = "", phoneUrl = "" }) {
   const read = async (key) => {
     const raw = await readKvValue({ ...kv, key, fetchImpl });
     try { return raw ? JSON.parse(raw) : null; } catch { return null; }
@@ -186,7 +292,10 @@ export async function runChinaProbe({ kv, fetchImpl = fetch, token = "", budget 
       if (!sticky && created.probesCount >= ISP_LOCATIONS.length) sticky = created.id;
       const result = await waitMeasurement(created.id, { fetchImpl });
       if (!result) continue;
-      for (const probeResult of result.results || []) fresh.push(resultToEntry(target, probeResult, at));
+      for (const probeResult of result.results || []) {
+        const entry = resultToEntry(target, probeResult, at);
+        if (entry) fresh.push(entry);
+      }
     }
   }
   await Promise.all(Array.from({ length: concurrency }, worker));
@@ -194,9 +303,11 @@ export async function runChinaProbe({ kv, fetchImpl = fetch, token = "", budget 
 
   const okCount = fresh.filter((e) => e.ok).length;
   console.log(`得到 ${fresh.length} 条三网结果，可用 ${okCount}`);
+  const phone = dedupePhoneEntries(previous, await fetchPhoneEntries(phoneUrl, { fetchImpl, now: now.getTime() }));
+  if (phoneUrl) console.log(`手机实测新增 ${phone.length} 条`);
   let verified = null;
-  if (fresh.length > 0) {
-    const merged = mergeEntries(previous, fresh, now.getTime());
+  if (fresh.length > 0 || phone.length > 0) {
+    const merged = mergeEntries(previous, [...fresh, ...phone], now.getTime());
     await writeKvValue({ ...kv, key: CN_PROBE_KEY, value: JSON.stringify(merged), fetchImpl });
     const snapshot = await refreshSnapshot({ kv, fetchImpl, entries: merged, pool, now: now.getTime() });
     verified = { all: snapshot.all.length, CT: snapshot.CT.length, CU: snapshot.CU.length, CM: snapshot.CM.length };
@@ -224,7 +335,9 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const publicVerified = process.env.PUBLIC_CN_VERIFIED === "1";
   // SUB_DEFAULT_ISP=CT|CU|CM：edgetunnel 拉订阅时默认按这个运营商排序（它的 sub:// 带不了 ?isp=）
   const defaultIsp = process.env.SUB_DEFAULT_ISP || "";
-  runChinaProbe({ kv, token, budget, communityUrl, publicVerified, defaultIsp }).catch((error) => {
+  // 手机实测结果（cf-termux-pick 的 best-ips.json 的 raw 地址），不填就不收
+  const phoneUrl = process.env.PHONE_RESULTS_URL || "";
+  runChinaProbe({ kv, token, budget, communityUrl, publicVerified, defaultIsp, phoneUrl }).catch((error) => {
     console.error(`失败: ${error.message}`);
     process.exitCode = 1;
   });
