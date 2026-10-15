@@ -80,9 +80,15 @@ test("sub is public by default, requires token when SUB_PUBLIC=0", async () => {
   assert.notEqual(publicResp.status, 401);
 });
 
-test("sub allows public access only when SUB_PUBLIC=1", async () => {
+test("public sub never leaks the server-side node template to anonymous requests", async () => {
   const response = await handleSub(new Request("https://example.com/sub?type=vless&n=1"), createPublicEnv());
-  assert.equal(response.status, 200);
+  assert.equal(response.status, 400);
+  assert.doesNotMatch(await response.text(), /11111111-1111-4111-8111-111111111111/);
+  const withParams = await handleSub(new Request("https://example.com/sub?type=vless&n=1&uuid=22222222-2222-4222-8222-222222222222&host=a.example.org&sni=a.example.org&path=%2F"), createPublicEnv());
+  assert.equal(withParams.status, 200);
+  const text = await withParams.text();
+  assert.match(text, /22222222-2222-4222-8222-222222222222/);
+  assert.doesNotMatch(text, /11111111-1111-4111-8111-111111111111/);
 });
 
 test("sub accepts read token from short query parameter", async () => {
@@ -173,7 +179,7 @@ test("sub sample mode applies to singbox with urltest outbound", async () => {
 test("edgetunnel probe prefers 443 on sampled nodes", async () => {
   const probe = new Request(
     "https://example.com/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000&mode=sample",
-    { headers: { "User-Agent": "Mozilla/5.0 (compatible) edgetunnel/2.3.1" } },
+    { headers: { Authorization: "Bearer read-token", "User-Agent": "Mozilla/5.0 (compatible) edgetunnel/2.3.1" } },
   );
 
   // 免只读 token（探测旁路签名）
@@ -225,7 +231,7 @@ test("edgetunnel probe caps sampled nodes at 30", async () => {
   };
   const probe = new Request(
     "https://example.com/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000&mode=sample",
-    { headers: { "User-Agent": "edgetunnel/2.3.1" } },
+    { headers: { Authorization: "Bearer read-token", "User-Agent": "edgetunnel/2.3.1" } },
   );
 
   const response = await handleSub(probe, env);
@@ -262,7 +268,7 @@ test("edgetunnel probe uses KV pool (mode=cidr was removed)", async () => {
   // 不带 mode 参数的探测：默认走 KV 池（稳定）
   const probe = new Request(
     "https://example.com/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000",
-    { headers: { "User-Agent": "edgetunnel/2.3.1" } },
+    { headers: { Authorization: "Bearer read-token", "User-Agent": "edgetunnel/2.3.1" } },
   );
   const response = await handleSub(probe, env);
   assert.equal(response.status, 200);
@@ -359,7 +365,7 @@ test("P1-4 sub responses carry Subscription-Userinfo header", async () => {
 
 test("P1-5 sub infers clash format from client UA when type is missing", async () => {
   const request = new Request("https://example.com/sub?n=1", {
-    headers: { "User-Agent": "ClashForWindows/0.20.39" },
+    headers: { Authorization: "Bearer read-token", "User-Agent": "ClashForWindows/0.20.39" },
   });
   const response = await handleSub(request, createPublicEnv());
   const text = await response.text();
@@ -370,7 +376,7 @@ test("P1-5 sub infers clash format from client UA when type is missing", async (
 
 test("P1-5 sub infers sing-box format from client UA when type is missing", async () => {
   const request = new Request("https://example.com/sub?n=1", {
-    headers: { "User-Agent": "sing-box/1.10.0" },
+    headers: { Authorization: "Bearer read-token", "User-Agent": "sing-box/1.10.0" },
   });
   const response = await handleSub(request, createPublicEnv());
   const parsed = JSON.parse(await response.text());
@@ -381,7 +387,7 @@ test("P1-5 sub infers sing-box format from client UA when type is missing", asyn
 
 test("P1-5 explicit type parameter beats UA inference", async () => {
   const request = new Request("https://example.com/sub?type=vless&n=1", {
-    headers: { "User-Agent": "ClashForWindows/0.20.39" },
+    headers: { Authorization: "Bearer read-token", "User-Agent": "ClashForWindows/0.20.39" },
   });
   const response = await handleSub(request, createPublicEnv());
   const text = await response.text();
@@ -686,9 +692,59 @@ test("待国内验证反代池：只有国内实测 ok 的才进订阅且排最�
     VLESS_PATH: "/ws", VLESS_PORT: "443", VLESS_TYPE: "ws", VLESS_SECURITY: "tls",
     SUB_KV: { async get(key) { return data.get(key) || null; }, put(key, value) { data.set(key, value); } },
   };
-  const probe = new Request("https://example.com/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000", { headers: { "User-Agent": "edgetunnel/2.3.1" } });
+  const probe = new Request("https://example.com/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000", { headers: { Authorization: "Bearer read-token", "User-Agent": "edgetunnel/2.3.1" } });
   const decoded = Buffer.from(await (await handleSub(probe, env)).text(), "base64").toString("utf8");
   const lines = decoded.split("\n").filter(Boolean);
   assert.match(lines[0], /@150\.230\.1\.1:443/);
   assert.ok(!decoded.includes("150.230.1.2"), "未验证的反代不能进订阅");
+});
+
+function edgeRequest() {
+  return new Request("https://example.com/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000", {
+    headers: { "User-Agent": "v2rayN/edgetunnel (https://github.com/cmliu/edgetunnel) Uid/0xabcdef Version/20261008" },
+  });
+}
+
+test("edgetunnel probe never gets a non-2xx response (falls back to CN snapshot)", async () => {
+  const snapshot = { updatedAt: Date.now(), all: [{ address: "104.16.1.1", port: 443, rtt: 80 }] };
+  const data = new Map([["BEST_IPS", "[]"], ["CN_VERIFIED", JSON.stringify(snapshot)]]);
+  const env = { SUB_KV: { async get(key) { return data.get(key) || null; }, async put() {} } };
+  const response = await handleSub(edgeRequest(), env);
+  assert.equal(response.status, 200);
+  const decoded = Buffer.from(await response.text(), "base64").toString("utf8");
+  assert.match(decoded, /@104\.16\.1\.1:443/);
+});
+
+test("edgetunnel probe survives a broken KV", async () => {
+  const env = { SUB_KV: { async get() { throw new Error("kv down"); }, async put() {} } };
+  const response = await handleSub(edgeRequest(), env);
+  assert.equal(response.status, 200);
+});
+
+test("TLS port filter runs before the node limit", async () => {
+  const nodes = [
+    ...Array.from({ length: 5 }, (_, i) => ({ address: `9.9.9.${i + 1}`, port: 80, name: `bad-${i}` })),
+    ...Array.from({ length: 5 }, (_, i) => ({ address: `8.8.8.${i + 1}`, port: 443, name: `good-${i}` })),
+  ];
+  const data = new Map([["BEST_IPS", JSON.stringify(nodes)]]);
+  const env = { ...createEnv(), SUB_KV: { async get(key) { return data.get(key) || null; }, async put() {} } };
+  const response = await handleSub(subRequest("/sub?type=vless&n=5&rank=off"), env);
+  assert.equal(response.status, 200);
+  const lines = (await response.text()).trim().split("\n");
+  assert.equal(lines.length, 5);
+  assert.ok(lines.every((line) => line.includes("@8.8.8.")));
+});
+
+test("/status masks node hostnames for anonymous visitors", async () => {
+  const health = { checkedAt: "2026-10-15T00:00:00Z", config: { hosts: ["1.secret-domain.example"] }, hosts: {} };
+  const data = new Map([["STATUS", "{}"], ["CN_HOST_HEALTH", JSON.stringify(health)]]);
+  const env = { SUB_READ_TOKEN: "read-token", SUB_KV: { async get(key) { return data.get(key) || null; }, async put() {} } };
+  const anon = await (await handleStatus(new Request("https://example.com/status"), env)).text();
+  assert.doesNotMatch(anon, /secret-domain/);
+});
+
+test("maskHost keeps only the first character and the registrable suffix", async () => {
+  const { maskHost } = await import("../src/api/status.js");
+  assert.equal(maskHost("1.leilaomi.ccwu.cc"), "1***.ccwu.cc");
+  assert.equal(maskHost("localhost"), "***");
 });
