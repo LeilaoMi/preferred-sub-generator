@@ -8,6 +8,7 @@
 //   只在该运营商下没被墙的域名上测，避免把「域名被墙」误判成「IP 不好」。结果并入 CN_PROBE_FEEDBACK。
 //
 // 没配任何域名时，测订阅自己的域名（<Pages 项目>.pages.dev），零配置也有用。
+import { installFetchTimeout } from "./lib/fetch-timeout.js";
 import { applyInstanceConfig } from "./lib/instance-config.js";
 import { readKvValue, writeKvValue } from "./lib/kv.js";
 import { sendNotification, notifyTargets } from "./lib/notify.js";
@@ -209,6 +210,7 @@ export async function runHostCheck({ kv, env = {}, fetchImpl = fetch, token = ""
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
+  installFetchTimeout();
   applyInstanceConfig();
   const kv = {
     accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
