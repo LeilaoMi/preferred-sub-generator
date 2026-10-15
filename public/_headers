@@ -1,0 +1,11 @@
+# 只作用于静态页面（Pages Functions 的 /sub、/api/* 等响应不受影响）
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  X-Frame-Options: DENY
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' https://speed.cloudflare.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'
+
+/admin.html
+  Cache-Control: no-store
+/setup.html
+  Cache-Control: no-store
