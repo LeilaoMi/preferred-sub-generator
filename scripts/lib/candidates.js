@@ -383,8 +383,12 @@ export async function collectCandidatesWithHealth({ manualText = "", remoteSourc
 
   // 稳定优先：默认放行社区源里的反代 IP（cmliu 源几乎全是 Oracle/AWS/Linode 等反代 IP，
   // 这正是它在国内稳定的原因）。ALLOW_RELAY=0 时只保留 Cloudflare 官方段 IPv4。
-  const cfOnlySources = allowRelay ? new Set() : new Set(
-    remoteSources.filter((source) => typeof source === "object" && source.cfOnly).map((source) => getSourceName(source, source.url)),
+  // 标了 cfOnly 的源始终只保留 Cloudflare 官方段（不受 ALLOW_RELAY 影响）；
+  // ALLOW_RELAY=0 时所有远程源都只保留官方段。
+  const cfOnlySources = new Set(
+    remoteSources
+      .filter((source) => typeof source === "object" && (source.cfOnly || !allowRelay))
+      .map((source) => getSourceName(source, source.url)),
   );
   const blacklist = [...DEFAULT_EDGE_BLACKLIST, ...String(extraBlacklist || "").split(",").map((item) => item.trim()).filter(Boolean)];
   const { candidates: filtered, dropped } = filterEdgeCandidates(uniqueCandidates(candidates), { cfOnlySources, blacklist });
