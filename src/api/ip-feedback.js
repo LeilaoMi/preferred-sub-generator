@@ -1,7 +1,7 @@
 import { requireAuthAsync } from "../security/auth.js";
 import { checkRateLimit } from "../security/rate-limit.js";
 import { jsonResponse } from "../utils/response.js";
-import { ensureD1Schema, hashClientIp } from "./speedtest-db.js";
+import { ensureD1Schema, hashClientIp, hashSalt } from "./speedtest-db.js";
 
 const FEEDBACK_KEY = "IP_FEEDBACK";
 // GitHub Actions 借 Globalping 国内三网探针自动实测的结果（scripts/china-probe.js 写入）
@@ -102,7 +102,10 @@ export async function saveIpFeedback(env, entries) {
   if (isD1(env)) {
     const { hasOk } = await ensureIpSchema(env.SPEED_DB);
     const statement = insertStatement(hasOk);
-    const statements = entries.map((entry) => env.SPEED_DB
+    // 表里没有 ok 列（迁移失败）时，失败记录写进去会变成 rtt=0 的"成功"，宁可不写
+    const writable = hasOk ? entries : entries.filter((entry) => entry.ok !== false && Number(entry.rtt) > 0);
+    if (writable.length === 0) return "d1";
+    const statements = writable.map((entry) => env.SPEED_DB
       .prepare(statement)
       .bind(
         entry.at,
@@ -190,8 +193,18 @@ export function isPeakHour(at) {
   return hour >= PEAK_START_HOUR && hour < PEAK_END_HOUR;
 }
 
+// 手机实测（cf-termux-pick 回传）是真实用户线路，比 Globalping 探针更有代表性，分开加权：
+// WiFi 就是你自家宽带，权重最高；5G/4G 同运营商但接入网不同，次之；认不出网络类型的按普通样本算
+export const PHONE_WEIGHTS = { wifi: 1.5, cellular: 1.2, unknown: 1 };
+
+export function sourceWeight(item) {
+  const tag = String(item?.clientHash || "");
+  if (!tag.startsWith("phone:")) return 1;
+  return PHONE_WEIGHTS[tag.split(":")[1]] ?? 1;
+}
+
 export function entryWeight(item, { now, halfLifeHours = DEFAULT_HALF_LIFE_HOURS, peakWeight = DEFAULT_PEAK_WEIGHT } = {}) {
-  let weight = 1;
+  let weight = sourceWeight(item);
   const ts = Date.parse(item?.at || "");
   if (Number.isFinite(now) && Number.isFinite(ts) && halfLifeHours > 0) {
     const ageHours = Math.max(0, now - ts) / 3600000;
@@ -230,6 +243,8 @@ export function summarizeIpScores(entries, options = {}) {
     const rtt = Number(item?.rtt);
     // 失败探测（ok:false）要计数，但不参与 rtt/speed 平均；无 ok 标记的无效 rtt 直接忽略
     if (!failed && !Number.isFinite(rtt)) continue;
+    // rtt<=0 的"成功"是坏数据（旧 D1 表没有 ok 列时，失败记录曾以 rtt=0 写入），不能排到最前
+    if (!failed && rtt <= 0) continue;
 
     let bucket = byAddress.get(address);
     if (!bucket) {
@@ -357,7 +372,7 @@ export async function handleIpFeedbackPost(request, env) {
   if (!raw || raw.length === 0) return jsonResponse({ error: "results must be a non-empty array" }, 400);
   if (raw.length > MAX_RESULTS) return jsonResponse({ error: `Too many results (max ${MAX_RESULTS})` }, 400);
 
-  const clientHash = await hashClientIp(getClientIp(request));
+  const clientHash = await hashClientIp(getClientIp(request), hashSalt(env));
   const at = new Date().toISOString();
   const entries = raw
     .map((item) => normalizeEntry({ ...item, at, clientHash }))
