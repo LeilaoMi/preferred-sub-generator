@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: preferred-sub-generator-china-host
+  group: preferred-sub-generator-cn-kv
   cancel-in-progress: false
 
 jobs:
