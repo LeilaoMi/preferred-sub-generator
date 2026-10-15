@@ -343,8 +343,9 @@ test("sub generates Sing-box subscription with localized generated names", async
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("Content-Type"), "application/json; charset=utf-8");
   assert.equal(response.headers.get("Content-Disposition"), 'inline; filename="preferred-sub.json"');
-  assert.equal(parsed.outbounds.length, 3);
-  // url-test 默认开启：自动测速组 + 选择器 + 节点
+  assert.equal(parsed.outbounds.length, 4);
+  assert.equal(parsed.route.final, "优选自动");
+  // url-test 默认开启：自动测速组 + 选择器 + 节点 + direct
   assert.equal(parsed.outbounds[0].type, "urltest");
   assert.equal(parsed.outbounds[0].tag, "自动测速");
   assert.equal(parsed.outbounds[1].type, "selector");
