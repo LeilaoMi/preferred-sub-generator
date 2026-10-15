@@ -93,6 +93,14 @@ function wrapText(text, width) {
   return text.match(new RegExp(`.{1,${width}}`, "g"))?.join("\n") || text;
 }
 
+// 子域名决定运营商：ct./cu./cm.<你的域名>（也认 dx/lt/yd）。edgetunnel 的 sub:// 会丢掉 ?参数但保留子域名，
+// 所以给 Pages 项目多绑几个子域名，就能在 edgetunnel 里分别填三网订阅。
+const HOST_ISP = { ct: "CT", dx: "CT", cu: "CU", lt: "CU", cm: "CM", yd: "CM" };
+export function ispFromHost(hostname) {
+  const label = String(hostname || "").toLowerCase().split(".")[0];
+  return HOST_ISP[label] || null;
+}
+
 async function readDefaultIsp(kv) {
   try {
     const state = JSON.parse((await kv?.get?.("CN_PROBE_STATE")) || "{}");
@@ -122,7 +130,8 @@ export async function handleSub(request, env) {
   if (!isEdgetunnelProbe(url, request)) return buildSub(request, env, url, false);
 
   const cache = typeof caches !== "undefined" ? caches.default : null;
-  const cacheKey = new Request(`${url.origin}/__edge-cache/sub?isp=${normalizeIsp(env.SUB_DEFAULT_ISP) || ""}`);
+  const edgeIsp = ispFromHost(url.hostname) || normalizeIsp(env.SUB_DEFAULT_ISP);
+  const cacheKey = new Request(`${url.origin}/__edge-cache/sub?isp=${edgeIsp || ""}`);
   if (cache) {
     try {
       const hit = await cache.match(cacheKey);
@@ -139,7 +148,7 @@ export async function handleSub(request, env) {
     response = null;
   }
   if (!response || !response.ok) {
-    response = await edgeSnapshotResponse(env, normalizeIsp(env.SUB_DEFAULT_ISP));
+    response = await edgeSnapshotResponse(env, edgeIsp);
   }
   if (cache && response.ok) {
     try {
@@ -233,7 +242,7 @@ async function buildSub(request, env, url, edgeProbe) {
   // edgetunnel 的 sub:// 只取域名（url.origin），带不了 ?isp=，所以默认运营商也可用 GitHub 变量 SUB_DEFAULT_ISP 设置
   // （china-probe 写进 CN_PROBE_STATE.defaultIsp），或 Pages 环境变量同名。
   const ispParam = String(url.searchParams.get("isp") || "").toLowerCase();
-  const isp = ispParam === "all" ? null : normalizeIsp(ispParam) || normalizeIsp(env.SUB_DEFAULT_ISP) || (rankOff ? null : await readDefaultIsp(env.SUB_KV));
+  const isp = ispParam === "all" ? null : normalizeIsp(ispParam) || ispFromHost(url.hostname) || normalizeIsp(env.SUB_DEFAULT_ISP) || (rankOff ? null : await readDefaultIsp(env.SUB_KV));
   if (!rankOff) {
     // 选节点只认最近 SUB_VERIFIED_DAYS 天（默认 3）的国内实测，太旧的实测不代表现在的线路
     try {
