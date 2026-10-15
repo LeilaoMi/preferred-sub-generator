@@ -23,7 +23,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  *  2026-10-12 修复：当 `type` 的值是订阅格式名时，它属于订阅格式，不属于节点配置，
  *  节点网络类型回退默认值 ws，避免生成 `vless://...?type=v2rayng` 这种坏链接。 */
 const SUBSCRIPTION_FORMAT_NAMES = new Set([
-  "vless", "v2rayng", "base64", "clash", "mihomo", "singbox", "sing-box", "shadowrocket",
+  "vless", "v2rayng", "base64", "clash", "mihomo", "singbox", "sing-box", "singbox-outbounds", "shadowrocket", "surge", "loon", "stash",
 ]);
 
 /** 从 URL 查询参数读取节点配置（无状态，对标其他订阅器做法） */
