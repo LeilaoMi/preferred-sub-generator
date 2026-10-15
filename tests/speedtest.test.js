@@ -60,10 +60,10 @@ function createD1Env() {
   return { SPEED_DB: db, _rows: rows };
 }
 
-function feedbackRequest(body) {
+function feedbackRequest(body, token) {
   return new Request("https://example.com/api/speedtest-feedback", {
     method: "POST",
-    headers: { "Content-Type": "application/json", "cf-connecting-ip": "203.0.113.9" },
+    headers: { "Content-Type": "application/json", "cf-connecting-ip": "203.0.113.9", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: JSON.stringify(body),
   });
 }
@@ -87,8 +87,8 @@ test("hashClientIp is deterministic and truncated", async () => {
 
 test("speedtest POST falls back to KV and stores hashed client", async () => {
   resetRateLimit();
-  const env = createKvEnv();
-  const response = await handleSpeedtestFeedbackPost(feedbackRequest({ speedMbps: 123.45, colo: "lax", ipCountry: "US" }), env);
+  const env = { ...createKvEnv(), SUB_TOKEN: "admin-token-123" };
+  const response = await handleSpeedtestFeedbackPost(feedbackRequest({ speedMbps: 123.45, colo: "lax", ipCountry: "US" }, "admin-token-123"), env);
   const parsed = await response.json();
   const stored = JSON.parse(env._data.get("SPEED_FEEDBACK"));
 
@@ -199,4 +199,12 @@ test("loadFeedback returns storage channel with entries", async () => {
   const fromD1 = await loadFeedback(createD1Env(), { now });
   assert.equal(fromD1.storage, "d1");
   assert.deepEqual(fromD1.entries, []);
+});
+
+test("speedtest POST without D1 skips anonymous KV writes (protects KV write quota)", async () => {
+  resetRateLimit();
+  const env = createKvEnv();
+  const response = await handleSpeedtestFeedbackPost(feedbackRequest({ speedMbps: 50, colo: "hkg" }), env);
+  assert.equal(response.status, 202);
+  assert.equal(env._data.has("SPEED_FEEDBACK"), false);
 });
