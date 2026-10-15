@@ -17,18 +17,19 @@ function createEnv(extra = {}) {
       async put(key, value) { data.set(key, value); },
     },
     _data: data,
+    SETUP_CODE: "setup-code-123",
     ...extra,
   };
 }
 
-function setupRequest(token, ip) {
+function setupRequest(token, ip, setupCode = "setup-code-123") {
   return new Request("https://example.com/api/admin-setup", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       "cf-connecting-ip": ip || uniqueIp(),
     },
-    body: JSON.stringify({ token }),
+    body: JSON.stringify({ token, setupCode }),
   });
 }
 
@@ -44,7 +45,7 @@ function authedRequest(token, ip) {
 
 test("setup GET 报告未设置状态", async () => {
   const response = await handleAdminSetupGet(new Request("https://example.com/api/admin-setup"), createEnv());
-  assert.deepEqual(await response.json(), { setupRequired: true });
+  assert.deepEqual(await response.json(), { setupRequired: true, setupEnabled: true });
 });
 
 test("setup 拒绝过短 token 且不写入 KV", async () => {
@@ -71,7 +72,7 @@ test("setup 成功后锁定：GET 变 false，重复 POST 返回 403", async () 
   await handleAdminSetupPost(setupRequest("this-is-a-long-test-token"), env);
 
   const state = await handleAdminSetupGet(new Request("https://example.com/api/admin-setup"), env);
-  assert.deepEqual(await state.json(), { setupRequired: false });
+  assert.deepEqual(await state.json(), { setupRequired: false, setupEnabled: false });
 
   const again = await handleAdminSetupPost(setupRequest("another-long-test-token"), env);
   assert.equal(again.status, 403);
@@ -111,4 +112,29 @@ test("requireAuthAsync 两边都没配时返回 Missing SUB_TOKEN", async () => 
   const auth = await requireAuthAsync(authedRequest("anything"), createEnv());
   assert.equal(auth.authorized, false);
   assert.equal(auth.reason, "Missing SUB_TOKEN");
+});
+
+test("setup 没配 SETUP_CODE 时拒绝（防抢占）", async () => {
+  const env = createEnv({ SETUP_CODE: undefined });
+  const response = await handleAdminSetupPost(setupRequest("this-is-a-long-test-token"), env);
+  assert.equal(response.status, 403);
+  assert.equal(env._data.has(KV_ADMIN_TOKEN_KEY), false);
+});
+
+test("setup 设置码错误时拒绝", async () => {
+  const env = createEnv();
+  const response = await handleAdminSetupPost(setupRequest("this-is-a-long-test-token", undefined, "wrong-code-000"), env);
+  assert.equal(response.status, 403);
+  assert.equal(env._data.has(KV_ADMIN_TOKEN_KEY), false);
+});
+
+test("setup 拒绝非 JSON 的跨站请求", async () => {
+  const env = createEnv();
+  const response = await handleAdminSetupPost(new Request("https://example.com/api/admin-setup", {
+    method: "POST",
+    headers: { "Content-Type": "text/plain", "cf-connecting-ip": uniqueIp() },
+    body: JSON.stringify({ token: "this-is-a-long-test-token", setupCode: "setup-code-123" }),
+  }), env);
+  assert.equal(response.status, 415);
+  assert.equal(env._data.has(KV_ADMIN_TOKEN_KEY), false);
 });
