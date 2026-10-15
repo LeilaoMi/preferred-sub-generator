@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: preferred-sub-generator-china-probe
+  group: preferred-sub-generator-cn-kv
   cancel-in-progress: false
 
 jobs:
