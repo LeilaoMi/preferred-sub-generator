@@ -51,3 +51,19 @@ test("loadIpScores 合并国内三网自动实测", async () => {
   assert.equal(scores.get("5.5.5.5").rtt, 60);
   assert.equal(scores.get("6.6.6.6").unreachable, true);
 });
+
+test("Globalping：按 ASN 识别运营商，额度不足时收缩预算", async () => {
+  const { ispFromProbe, adaptBudget, cnLocations } = await import("../scripts/lib/globalping.js");
+  assert.equal(ispFromProbe({ asn: 4134, network: "China Telecom" }), "CT");
+  assert.equal(ispFromProbe({ asn: 56046, network: "China Mobile Communications" }), "CM");
+  assert.equal(ispFromProbe({ asn: 17621, network: "China Unicom Shanghai network" }), "CU");
+  assert.equal(adaptBudget(150, 100, { perTarget: 3, reserve: 30 }), 23);
+  assert.equal(adaptBudget(150, null), 150);
+  assert.ok(cnLocations().every((loc) => loc.country === "CN" && loc.asn && loc.tags.includes("eyeball-network")));
+});
+
+test("pickTargets 跳过非 TLS 端口", () => {
+  const pool = [{ address: "1.1.1.1", port: 80 }, { address: "1.1.1.2", port: 443 }, { address: "1.1.1.3", port: 8080 }];
+  const { targets } = pickTargets(pool, [], 0, 10);
+  assert.deepEqual(targets.map((t) => t.address), ["1.1.1.2"]);
+});
