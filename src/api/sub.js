@@ -71,11 +71,12 @@ function subscriptionHeaders(filename) {
 export function inferTypeFromUa(userAgent) {
   const ua = String(userAgent || "").toLowerCase();
   if (!ua) return null;
+  // Stash 的 UA 形如 "Stash/2.x Clash/1.x"，必须先于 clash 判断
+  if (ua.includes("stash")) return "stash";
   if (ua.includes("clash") || ua.includes("mihomo")) return "clash";
   if (ua.includes("sing-box") || ua.includes("singbox")) return "sing-box";
   if (ua.includes("surge")) return "surge";
   if (ua.includes("loon")) return "loon";
-  if (ua.includes("stash")) return "stash";
   if (ua.includes("shadowrocket")) return "shadowrocket";
   if (ua.includes("v2rayng") || ua.includes("v2ray")) return "v2rayng";
   return null;
@@ -210,6 +211,11 @@ async function buildSub(request, env, url, edgeProbe) {
       return jsonResponse({ error: configWarnings.find((w) => w.level === "error").message }, 500);
     }
     template = nodeConfigToTemplate(nodeConfig);
+    // 所有生成器都只会写 WebSocket 传输；其他传输（grpc/tcp/xhttp）明确拒绝，免得生成连不上的配置
+    const transport = String(template.type || "ws").toLowerCase();
+    if (transport !== "ws") {
+      return jsonResponse(errorPayload("UNSUPPORTED_TRANSPORT", `只支持 ws 传输，当前节点是 ${transport}`), 400);
+    }
   }
   const { colos } = parseColoFilter(url.searchParams.get("colo"), request);
   // 2026-10-12 重设计：删除 mode=cidr（Karing 真实链路验证失败，已证伪）。
@@ -313,6 +319,10 @@ async function buildSub(request, env, url, edgeProbe) {
 
   if (type === "clash" || type === "mihomo") {
     return privateTextResponse(generateClashSubscription(template, normalizeNodes(nodes), generatorOptions), "text/yaml; charset=utf-8", subscriptionHeaders("preferred-sub.yaml"));
+  }
+
+  if (type === "singbox-outbounds") {
+    return privateTextResponse(generateSingboxSubscription(template, normalizeNodes(nodes), { ...generatorOptions, outboundsOnly: true }), "application/json; charset=utf-8", subscriptionHeaders("preferred-sub-outbounds.json"));
   }
 
   if (type === "singbox" || type === "sing-box") {
