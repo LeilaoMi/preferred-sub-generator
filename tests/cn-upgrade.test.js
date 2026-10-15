@@ -271,9 +271,9 @@ test("runHostCheck 端到端：体检 + 只在没被墙的运营商上做组合�
       const id = `m${created.length}`;
       created.push(body);
       const results = body.locations.map((loc) => {
-        const network = loc.magic.replace("CN+", "");
-        if (network === "China Mobile") return { probe: { network }, result: { status: "failed", rawOutput: "read ECONNRESET" } };
-        return { probe: { network }, result: { status: "finished", statusCode: 200, rawBody: trace, timings: { total: 500, tcp: 120 } } };
+        const network = { 4134: "Chinanet", 4837: "China Unicom", 9808: "China Mobile" }[loc.asn];
+        if (network === "China Mobile") return { probe: { network, asn: loc.asn }, result: { status: "failed", rawOutput: "read ECONNRESET" } };
+        return { probe: { network, asn: loc.asn }, result: { status: "finished", statusCode: 200, rawBody: trace, timings: { total: 500, tcp: 120 } } };
       });
       measurements.set(id, { status: "finished", results });
       return { ok: true, status: 202, json: async () => ({ id }) };
@@ -290,7 +290,7 @@ test("runHostCheck 端到端：体检 + 只在没被墙的运营商上做组合�
   const combos = created.filter((c) => c.target === "9.9.9.9");
   assert.ok(combos.length > 0);
   assert.equal(combos[combos.length - 1].measurementOptions.request.host, "1.my.cc");
-  assert.ok(!combos[combos.length - 1].locations.some((l) => l.magic.includes("Mobile")), "移动下域名被墙，不能拿它做组合测");
+  assert.ok(!combos[combos.length - 1].locations.some((l) => l.asn === 9808), "移动下域名被墙，不能拿它做组合测");
   const feedback = JSON.parse(kvData.get("CN_PROBE_FEEDBACK"));
   assert.ok(feedback.every((e) => e.colo === "HKG" && e.ok && e.rtt === 120));
 });
