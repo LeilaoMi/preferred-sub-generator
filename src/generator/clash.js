@@ -1,3 +1,5 @@
+import { nodeColo, nodeName, TEST_URL } from "./common.js";
+
 function yamlString(value) {
   return JSON.stringify(String(value));
 }
@@ -14,26 +16,29 @@ const REGION_MAP = {
 };
 
 function getRegion(node) {
-  const colo = String(node.colo || node.userColo || "").toUpperCase();
-  return REGION_MAP[colo] || "其他";
+  return REGION_MAP[nodeColo(node)] || "其他";
 }
 
-function buildProxy(template, override, index) {
+// sniKey：Clash/mihomo 用 servername，Stash 用 sni
+function buildProxy(template, override, index, { sniKey = "servername" } = {}) {
   const node = { ...template, ...override };
-  const name = node.name || `优选-${index + 1}`;
+  const name = nodeName(node, index);
   const tls = node.security === "tls";
   const lines = [
     `  - name: ${yamlString(name)}`,
     "    type: vless",
     `    server: ${yamlString(node.address)}`,
-    `    port: ${node.port}`,
+    `    port: ${Number(node.port) || 443}`,
     `    uuid: ${yamlString(node.uuid)}`,
+    "    udp: true",
     "    network: ws",
     `    tls: ${tls}`,
   ];
 
-  if (tls && node.sni) {
-    lines.push(`    servername: ${yamlString(node.sni)}`);
+  if (tls) {
+    const sni = node.sni || node.host;
+    if (sni) lines.push(`    ${sniKey}: ${yamlString(sni)}`);
+    lines.push("    client-fingerprint: chrome");
   }
 
   lines.push("    ws-opts:");
@@ -43,67 +48,56 @@ function buildProxy(template, override, index) {
     lines.push(`        Host: ${yamlString(node.host)}`);
   }
 
-  return { name, yaml: lines.join("\n"), region: getRegion({ ...template, ...override }) };
+  return { name, yaml: lines.join("\n"), region: getRegion(node) };
 }
 
-export function generateClashSubscription(template, nodes, options = {}) {
-  const proxies = nodes.map((node, index) => buildProxy(template, node, index));
+function urlTestLines(name, memberLines) {
+  return [
+    `  - name: ${yamlString(name)}`,
+    "    type: url-test",
+    `    url: ${yamlString(TEST_URL)}`,
+    "    interval: 300",
+    "    tolerance: 80",
+    "    proxies:",
+    memberLines,
+  ];
+}
+
+export function buildClashYaml(template, nodes, options = {}, proxyOptions = {}) {
+  const proxies = nodes.map((node, index) => buildProxy(template, node, index, proxyOptions));
   const names = proxies.map((proxy) => `      - ${yamlString(proxy.name)}`).join("\n");
 
-  // 按地区自动归类（借鉴 figozhu/Sub-Merger-CFWorker 的思路，MIT）
-  const regionGroups = {};
-  for (const proxy of proxies) {
-    const r = proxy.region || "其他";
-    if (!regionGroups[r]) regionGroups[r] = [];
-    regionGroups[r].push(proxy.name);
+  if (proxies.length === 0) {
+    return ["proxies: []", "proxy-groups: []", "rules:", "  - MATCH,DIRECT", ""].join("\n");
   }
 
-  const groups = [];
-  const regionGroupType = options.autoTest ? "url-test" : "select";
-  for (const [region, names] of Object.entries(regionGroups)) {
-    if (names.length === 0) continue;
-    const rg = [
-      `  - name: "${region}优选"`,
-      `    type: ${regionGroupType}`,
-    ];
-    if (options.autoTest) {
-      rg.push(
-        '    url: "http://www.gstatic.com/generate_204"',
-        "    interval: 300",
-        "    tolerance: 80",
-      );
-    }
-    rg.push(
-      "    proxies:",
-      names.map((n) => `      - ${yamlString(n)}`).join("\n"),
-    );
-    groups.push(...rg);
+  // 按落地地区归类（思路参考 figozhu/Sub-Merger-CFWorker，MIT）
+  const regionGroups = new Map();
+  for (const proxy of proxies) {
+    if (!regionGroups.has(proxy.region)) regionGroups.set(proxy.region, []);
+    regionGroups.get(proxy.region).push(proxy.name);
   }
-  const regionSelects = Object.keys(regionGroups).map((r) => `      - "${r}优选"`).join("\n");
-  if (options.autoTest && proxies.length > 0) {
-    // 抽样模式：客户端连接时自己测速挑活的，坏节点几秒内被跳过
+  // 只有一个地区时不单独建地区组，避免和"自动测速"重复
+  const useRegions = options.autoTest && regionGroups.size > 1;
+
+  const groups = [];
+  if (options.autoTest) {
+    groups.push(...urlTestLines("自动测速", names));
+    if (useRegions) {
+      for (const [region, members] of regionGroups) {
+        groups.push(...urlTestLines(`${region}优选`, members.map((n) => `      - ${yamlString(n)}`).join("\n")));
+      }
+    }
     groups.push(
-      "  - name: \"自动测速\"",
-      "    type: url-test",
-      "    url: \"http://www.gstatic.com/generate_204\"",
-      "    interval: 300",
-      "    tolerance: 80",
-      "    proxies:",
-      names,
       "  - name: \"优选自动\"",
       "    type: select",
       "    proxies:",
       "      - \"自动测速\"",
+      ...(useRegions ? [...regionGroups.keys()].map((r) => `      - ${yamlString(`${r}优选`)}`) : []),
       names,
-      regionSelects,
     );
   } else {
-    groups.push(
-      "  - name: \"优选自动\"",
-      "    type: select",
-      "    proxies:",
-      names,
-    );
+    groups.push("  - name: \"优选自动\"", "    type: select", "    proxies:", names);
   }
 
   return [
@@ -115,4 +109,8 @@ export function generateClashSubscription(template, nodes, options = {}) {
     "  - MATCH,优选自动",
     "",
   ].join("\n");
+}
+
+export function generateClashSubscription(template, nodes, options = {}) {
+  return buildClashYaml(template, nodes, options, { sniKey: "servername" });
 }
