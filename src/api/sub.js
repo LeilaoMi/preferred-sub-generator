@@ -64,6 +64,8 @@ function subscriptionHeaders(filename) {
   return {
     "Content-Disposition": `inline; filename="${filename}"`,
     "Subscription-Userinfo": `upload=0; download=107374182400; total=107374182400; expire=${expire}`,
+    // 告诉客户端多久自动更新一次（小时）：国内实测每 2 小时左右刷新，6 小时拉一次足够
+    "Profile-Update-Interval": "6",
   };
 }
 
@@ -166,7 +168,10 @@ async function buildSub(request, env, url, edgeProbe) {
   const auth = edgeProbe ? { authorized: true } : await requireReadAuth(request, env);
   if (!auth.authorized) return unauthorizedResponse();
 
-  const explicitType = url.searchParams.get("type");
+  // 旧链接里 type= 可能是传输方式（grpc/tcp），不是订阅格式：这种情况按 UA 推断格式，传输方式交给后面的 ws 校验报清楚的错
+  const rawTypeParam = url.searchParams.get("type");
+  const transportOnly = rawTypeParam && !url.searchParams.get("net") && ["grpc", "tcp", "h2", "http", "httpupgrade", "xhttp", "splithttp", "quic", "kcp"].includes(rawTypeParam.toLowerCase());
+  const explicitType = transportOnly ? null : rawTypeParam;
   const type = edgeProbe ? "base64" : (explicitType || inferTypeFromUa(request.headers.get("user-agent")) || "vless").toLowerCase();
   const explicitMode = url.searchParams.get("mode");
   // 2026-10-12：mode 只支持 sample。cidr 已删除（实测证伪），显式拒绝比静默忽略诚实。
