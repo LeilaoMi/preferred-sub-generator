@@ -15,13 +15,21 @@ import { getNodeConfig, getNodeConfigFromUrl, nodeConfigToTemplate, validateNode
 import { readBestIps, readBestIpsV6, readPendingCnIps } from "./kv.js";
 import { filterNodesByColo, isMeasuredOk, parseColoFilter, readMinNodes, readRttDropMs, sampleNodes, selectVerifiedNodes, withPreferredPort } from "./node-filter.js";
 import { getPreferredPortOrder, NON_TLS_PORTS } from "../utils/ports.js";
-import { readQuarantine, filterQuarantined } from "./quarantine.js";
 
 const MAX_NODES = 50;
 // 探测旁路给 edgetunnel 的节点上限
 const PROBE_MAX_NODES = 30;
 
 const EDGE_PROBE_UUID = "00000000-0000-4000-8000-000000000000";
+const EDGE_TEMPLATE = Object.freeze({
+  uuid: EDGE_PROBE_UUID,
+  host: "example.com",
+  sni: "example.com",
+  path: "/",
+  port: 443,
+  type: "ws",
+  security: "tls",
+});
 
 function isEdgetunnelProbe(url, request) {
   const uuid = (url.searchParams.get("uuid") || "").toLowerCase();
@@ -93,10 +101,58 @@ async function readDefaultIsp(kv) {
   }
 }
 
+// edgetunnel 拉 sub:// 时：非 2xx 会被它变成 127.0.0.1:1234 假节点，而且请求没有超时。
+// 所以探测旁路永远返回 200，并缓存 5 分钟；生成失败时退回国内快照。
+const EDGE_CACHE_SECONDS = 300;
+
+async function edgeSnapshotResponse(env, isp) {
+  let items = [];
+  try {
+    items = snapshotList(await readSnapshot(env.SUB_KV, CN_VERIFIED_KEY).catch(() => null), isp);
+  } catch {
+    items = [];
+  }
+  const nodes = dropTlsPortMismatch(items.slice(0, PROBE_MAX_NODES), EDGE_TEMPLATE);
+  return privateTextResponse(base64Encode(generateVlessSubscription(EDGE_TEMPLATE, nodes)), "text/plain; charset=utf-8", subscriptionHeaders("preferred-sub-edge.txt"));
+}
+
 export async function handleSub(request, env) {
   const url = new URL(request.url);
-  const edgeProbe = isEdgetunnelProbe(url, request);
+  if (!isEdgetunnelProbe(url, request)) return buildSub(request, env, url, false);
 
+  const cache = typeof caches !== "undefined" ? caches.default : null;
+  const cacheKey = new Request(`${url.origin}/__edge-cache/sub?isp=${normalizeIsp(env.SUB_DEFAULT_ISP) || ""}`);
+  if (cache) {
+    try {
+      const hit = await cache.match(cacheKey);
+      if (hit) return hit;
+    } catch {
+      // 缓存不可用时直接生成
+    }
+  }
+  let response;
+  try {
+    response = await buildSub(request, env, url, true);
+  } catch (error) {
+    console.log(`edge sub failed: ${error?.message || error}`);
+    response = null;
+  }
+  if (!response || !response.ok) {
+    response = await edgeSnapshotResponse(env, normalizeIsp(env.SUB_DEFAULT_ISP));
+  }
+  if (cache && response.ok) {
+    try {
+      const cached = new Response(response.clone().body, response);
+      cached.headers.set("Cache-Control", `public, max-age=${EDGE_CACHE_SECONDS}`);
+      await cache.put(cacheKey, cached);
+    } catch {
+      // 忽略缓存写入失败
+    }
+  }
+  return response;
+}
+
+async function buildSub(request, env, url, edgeProbe) {
   const auth = edgeProbe ? { authorized: true } : await requireReadAuth(request, env);
   if (!auth.authorized) return unauthorizedResponse();
 
@@ -112,20 +168,15 @@ export async function handleSub(request, env) {
   // edgetunnel 探测直接用占位模板，不需要真实节点配置（edgetunnel 只提取 IP，节点信息用它自己的）。
   let template;
   if (edgeProbe) {
-    template = {
-      uuid: EDGE_PROBE_UUID,
-      host: "example.com",
-      sni: "example.com",
-      path: "/",
-      port: 443,
-      type: "ws",
-      security: "tls",
-    };
+    template = EDGE_TEMPLATE;
   } else {
     let nodeConfig = getNodeConfigFromUrl(url);
+    // 公开模式（未设 SUB_PUBLIC=0、匿名访问）下绝不回退到服务端模板（KV TEMPLATE / VLESS_*），
+    // 否则任何人不带参数访问 /sub 就能拿到真实 UUID、域名和路径。
+    const serverTemplateAllowed = !auth.public;
     // KV 热替换（借鉴 baiyujun/cloudflare-top200-fixed-subscription 的思路，MIT）：
     // KV 里有 TEMPLATE 时优先用，不用改环境变量、不用重部署
-    if (!nodeConfig && env.SUB_KV) {
+    if (!nodeConfig && serverTemplateAllowed && env.SUB_KV) {
       try {
         const { readTemplate } = await import("./kv.js");
         const kvTemplate = await readTemplate(env.SUB_KV).catch(() => null);
@@ -143,6 +194,9 @@ export async function handleSub(request, env) {
       } catch {
         // KV 读取失败，继续走环境变量
       }
+    }
+    if (!nodeConfig && !serverTemplateAllowed) {
+      return jsonResponse({ error: "公开模式下请在订阅 URL 中携带 uuid/sni/host 等节点参数；服务端模板只对带只读 token 的请求生效（需设 SUB_PUBLIC=0）" }, 400);
     }
     if (!nodeConfig) {
       try {
@@ -162,7 +216,12 @@ export async function handleSub(request, env) {
   // 采样不解决"IP 是否服务你的域名"问题，删掉比留着诚实。
   let nodes;
   let scores = null;
-  nodes = await readBestIps(env.SUB_KV);
+  try {
+    nodes = await readBestIps(env.SUB_KV);
+  } catch (error) {
+    console.log(`readBestIps failed: ${error?.message || error}`);
+    nodes = [];
+  }
   const rankOff = url.searchParams.get("rank") === "off";
   // ?isp=ct|cu|cm 分运营商订阅：只用该运营商探针的国内实测排序；缺省为三网综合
   // edgetunnel 的 sub:// 只取域名（url.origin），带不了 ?isp=，所以默认运营商也可用 GitHub 变量 SUB_DEFAULT_ISP 设置
@@ -171,12 +230,17 @@ export async function handleSub(request, env) {
   const isp = ispParam === "all" ? null : normalizeIsp(ispParam) || normalizeIsp(env.SUB_DEFAULT_ISP) || (rankOff ? null : await readDefaultIsp(env.SUB_KV));
   if (!rankOff) {
     // 选节点只认最近 SUB_VERIFIED_DAYS 天（默认 3）的国内实测，太旧的实测不代表现在的线路
-    ({ scores } = await loadIpScores(env, { days: env.SUB_VERIFIED_DAYS || 3, isp }));
+    try {
+      ({ scores } = await loadIpScores(env, { days: env.SUB_VERIFIED_DAYS || 3, isp }));
+    } catch (error) {
+      console.log(`loadIpScores failed: ${error?.message || error}`);
+      scores = null;
+    }
     // 待验证反代池里国内实测 ok 的才并入（不在 BEST_IPS 里的）
     if (!sampleMode && scores && scores.size > 0) {
       const dropMs = readRttDropMs(env);
       const known = new Set(nodes.map((node) => node.address));
-      const pending = (await readPendingCnIps(env.SUB_KV))
+      const pending = (await readPendingCnIps(env.SUB_KV).catch(() => []))
         .filter((node) => !known.has(node.address) && isMeasuredOk(scores.get(node.address), dropMs))
         .map(({ pendingCn, ...node }) => ({ ...node, name: node.address, source: node.source }));
       nodes = [...nodes, ...pending];
@@ -190,44 +254,27 @@ export async function handleSub(request, env) {
         ({ nodes, scores } = applySnapshotFallback(nodes, scores, snapshotList(await readSnapshot(env.SUB_KV, CN_VERIFIED_KEY), isp), { penalty: 50, source: "cn-snapshot" }));
       }
       if (countOk() < floor) {
-        ({ nodes, scores } = applySnapshotFallback(nodes, scores, snapshotList(await readSnapshot(env.SUB_KV, CN_COMMUNITY_KEY), isp), { penalty: 1000, source: "cn-community" }));
+        ({ nodes, scores } = applySnapshotFallback(nodes, scores, snapshotList(await readSnapshot(env.SUB_KV, CN_COMMUNITY_KEY).catch(() => null), isp), { penalty: 1000, source: "cn-community" }));
       }
     }
   }
   // P1-3: SUB_PREFERRED_PORTS 可覆盖端口顺序
   const portOrder = getPreferredPortOrder(env);
-  const colosFiltered = filterNodesByColo(nodes, colos).nodes;
+  // 先过滤（TLS 端口不匹配）再截断，避免坏节点占满名额后返回空
+  const colosFiltered = dropTlsPortMismatch(
+    filterNodesByColo(nodes, colos).nodes.map((node) => withPreferredPort(node, portOrder)),
+    template,
+  );
+  const limit = getLimit(url, edgeProbe ? PROBE_MAX_NODES : MAX_NODES);
   if (sampleMode) {
     // 显式 mode=sample 才随机抽样（可选玩法，不再是 edgetunnel 的默认行为）
-    nodes = sampleNodes(colosFiltered, {
-      limit: getLimit(url, edgeProbe ? PROBE_MAX_NODES : MAX_NODES),
-      scores,
-      env,
-    }).map((node) => withPreferredPort(node, portOrder));
+    nodes = sampleNodes(colosFiltered, { limit, scores, env });
   } else if (rankOff) {
-    nodes = colosFiltered.slice(0, getLimit(url, MAX_NODES)).map((node) => withPreferredPort(node, portOrder));
+    nodes = colosFiltered.slice(0, limit);
   } else {
     // 默认（含 edgetunnel 探测）：固定输出 国内实测 ok > 手动置顶 > 过审池补齐，每次结果一致
-    nodes = selectVerifiedNodes(colosFiltered, scores, {
-      limit: getLimit(url, edgeProbe ? PROBE_MAX_NODES : MAX_NODES),
-      env,
-    }).map((node) => withPreferredPort(node, portOrder));
+    nodes = selectVerifiedNodes(colosFiltered, scores, { limit, env });
   }
-  // 信誉 quarantine：过滤掉连续失败被隔离的 IP（24h 冷却后自动放回）
-  if (env.SUB_KV) {
-    try {
-      const quarantine = await readQuarantine(env.SUB_KV);
-      const before = nodes.length;
-      nodes = filterQuarantined(nodes, quarantine);
-      if (nodes.length < before) {
-        console.log(`quarantine filtered ${before - nodes.length} nodes`);
-      }
-    } catch {
-      // quarantine 读取失败不阻断
-    }
-  }
-  // 2026-10-13：TLS 订阅里去掉 80/8080 等非 TLS 端口的节点（反代源偶尔只给 :80，配 TLS 必然握不上手）
-  nodes = dropTlsPortMismatch(nodes, template);
   // P2-6: ?ip6=1 追加未实测 IPv6（不占 limit 名额、不进排名抽样；探测旁路不混入）
   if (!edgeProbe && url.searchParams.get("ip6") === "1") {
     const v6Nodes = await readBestIpsV6(env.SUB_KV);
@@ -235,7 +282,7 @@ export async function handleSub(request, env) {
   }
   // 多域名轮换（可选，SUB_ROTATE_HOSTS=1）：节点的 host/sni 只用该运营商国内体检没被墙的域名
   if (!edgeProbe) {
-    const health = await readHostHealth(env.SUB_KV);
+    const health = await readHostHealth(env.SUB_KV).catch(() => null);
     if (rotationEnabled(health, env)) nodes = applyHostRotation(nodes, template, health, { isp, env });
   }
   const generatorOptions = { autoTest: true };
