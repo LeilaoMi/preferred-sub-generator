@@ -41,24 +41,34 @@ test("v2rayNG base64 decodes to valid vless URI", () => {
   assert.equal(url.hostname, "1.1.1.1");
 });
 
-test("Surge output has Proxy section and vless nodes", async () => {
+test("Surge output uses Trojan-WS (Surge has no VLESS)", async () => {
   const { generateSurgeSubscription } = await import("../src/generator/surge.js");
-  const conf = generateSurgeSubscription(template, nodes);
+  const conf = generateSurgeSubscription(template, nodes, { autoTest: true });
   assert.match(conf, /^\[Proxy\]/m);
-  assert.match(conf, /vless, 1\.1\.1\.1, 443/);
-  assert.match(conf, /username=11111111-1111-4111-8111-111111111111/);
+  assert.match(conf, /^测试节点 = trojan, 1\.1\.1\.1, 443, password=11111111-1111-4111-8111-111111111111, sni=origin\.example\.com, ws=true, ws-path=\/ws, ws-headers=Host:origin\.example\.com/m);
+  assert.doesNotMatch(conf, /vless/i);
+  assert.match(conf, /^自动测速 = url-test, 测试节点, url=/m);
 });
 
-test("Loon output has Proxy section and vless nodes", async () => {
+test("Loon output follows the documented VLESS syntax", async () => {
   const { generateLoonSubscription } = await import("../src/generator/loon.js");
-  const conf = generateLoonSubscription(template, nodes);
+  const conf = generateLoonSubscription(template, nodes, { autoTest: true });
   assert.match(conf, /^\[Proxy\]/m);
-  assert.match(conf, /vless,1\.1\.1\.1,443/);
+  assert.match(conf, /^测试节点 = VLESS,1\.1\.1\.1,443,"11111111-1111-4111-8111-111111111111",transport=ws,path=\/ws,host=origin\.example\.com,over-tls=true,sni=origin\.example\.com/m);
+  assert.match(conf, /^自动测速 = url-test,测试节点,url=/m);
+  assert.doesNotMatch(conf, /Remote Proxy/);
 });
 
-test("Stash output reuses Clash format", async () => {
+test("Stash output uses sni (not servername)", async () => {
   const { generateStashSubscription } = await import("../src/generator/stash.js");
   const yaml = generateStashSubscription(template, nodes);
   assert.match(yaml, /^proxies:/m);
-  assert.match(yaml, /^proxy-groups:/m);
+  assert.match(yaml, /^\s+sni: "origin\.example\.com"/m);
+  assert.doesNotMatch(yaml, /servername/);
+});
+
+test("UA inference: Stash before Clash", async () => {
+  const { inferTypeFromUa } = await import("../src/api/sub.js");
+  assert.equal(inferTypeFromUa("Stash/2.4.6 Clash/1.9.0"), "stash");
+  assert.equal(inferTypeFromUa("clash.meta"), "clash");
 });
