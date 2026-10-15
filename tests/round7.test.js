@@ -51,6 +51,7 @@ test("phone results: VPN runs are dropped, carrier and time are normalized", () 
   assert.equal(entries[0].region, "CN-CU");
   assert.equal(entries[0].clientHash, "phone:wifi:abc");
   assert.deepEqual(phoneResultsToEntries({ ...data, egress_cn: false }, NOW), []);
+  assert.deepEqual(phoneResultsToEntries({ ...data, egress_cn: undefined }, NOW), []);
   assert.equal(dedupePhoneEntries(entries, entries).length, 0);
 });
 
