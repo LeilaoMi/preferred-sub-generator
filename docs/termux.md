@@ -1,7 +1,8 @@
 # 在手机 Termux 上做国内实测
 
-订阅稳不稳，取决于 IP 在**你自己的线路**上通不通。GitHub Actions 在美国，只能初筛；
-真正决定订阅顺序的是这份手机实测。
+Globalping 的国内探针多在家宽或机房，不等于你的手机线路。手机实测能把**你自己线路**上的结果并进排序。
+
+推荐用 [cf-termux-pick](https://github.com/LeilaoMi/cf-termux-pick)（Python，结果推到 GitHub，本项目自动拉取，不需要 D1）。下面是本仓库自带的另一种方式：直接回传到你的部署，需要绑定 D1 和管理 token。
 
 ## 一次性安装
 
@@ -9,7 +10,7 @@
 pkg update && pkg install -y nodejs-lts git
 git clone https://github.com/LeilaoMi/preferred-sub-generator ~/psg
 cat > ~/.psg.env <<'CONF'
-SITE_URL=https://yxdy.woniu.bee.al
+SITE_URL=https://你的部署域名
 SUB_TOKEN=你的管理token
 CONF
 chmod 600 ~/.psg.env
