@@ -10,7 +10,7 @@ export function nodeName(node, index) {
   return node.name || `优选-${index + 1}`;
 }
 
-// 与节点名（formatEdgeNodeName 用 userColo || colo）保持同一优先级，避免名字写香港却分进美国组
+// 与节点名（formatEdgeNodeName 只用国内拿到的 userColo）一致，避免名字和分组对不上
 export function nodeColo(node) {
-  return String(node.userColo || node.colo || "").toUpperCase();
+  return String(node.userColo || "").toUpperCase();
 }
