@@ -92,6 +92,7 @@ export function decorateMeasured(node, score) {
     ...node,
     userRtt: round(rtt, 1),
     userColo: score.colo || undefined,
+    userRegion: score.region || undefined,
     userSpeed: score.speed != null && Number.isFinite(Number(score.speed)) ? round(Number(score.speed), 2) : undefined,
     userSamples: Number.isFinite(Number(score.samples)) ? Number(score.samples) : undefined,
   };
