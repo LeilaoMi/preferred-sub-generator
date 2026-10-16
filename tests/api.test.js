@@ -7,7 +7,7 @@ import { handleSub } from "../src/api/sub.js";
 import { handleTemplateGet, handleTemplatePost } from "../src/api/template.js";
 import { handleVersions } from "../src/api/versions.js";
 
-const expectedGeneratedName = "🇺🇸 美国洛杉矶 LAX #1";
+const expectedGeneratedName = "🌐 未实测 #1";
 const expectedEncodedGeneratedName = encodeURIComponent(expectedGeneratedName);
 
 const template = "vless://11111111-1111-4111-8111-111111111111@example.com:443?encryption=none&security=tls&sni=example.com&type=ws&host=example.com&path=%2Fws#原始节点";
@@ -106,8 +106,8 @@ test("sub generates Clash subscription", async () => {
   assert.equal(response.headers.get("Content-Disposition"), 'inline; filename="preferred-sub.yaml"');
   assert.match(text, /server: "1.1.1.1"/);
   assert.match(text, /server: "1.1.1.2"/);
-  assert.match(text, /🇺🇸 美国洛杉矶 LAX #1/);
-  assert.match(text, /🇺🇸 美国圣何塞 SJC #2/);
+  assert.match(text, /🌐 未实测 #1/);
+  assert.match(text, /🌐 未实测 #2/);
   assert.doesNotMatch(text, /1\.1\.1\.3/);
 });
 
@@ -152,7 +152,7 @@ test("sub sample mode prefers 443 and hides upstream latency in names", async ()
   assert.match(text, /server: "1\.1\.1\.1"[\s\S]*?port: 443/);
   // 名称不再带美国测速机的延迟（12ms/34ms/55ms 都不许出现）
   assert.doesNotMatch(text, /12ms|34ms|55ms/);
-  assert.match(text, /🇺🇸 美国洛杉矶 LAX #\d/);
+  assert.match(text, /🌐 未实测 #\d/);
   // url-test 默认开启（2026-10-12 起所有模式都带）
   assert.match(text, /type: url-test/);
 });
