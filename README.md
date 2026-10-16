@@ -2,65 +2,78 @@
 
 [![CI](https://github.com/LeilaoMi/preferred-sub-generator/actions/workflows/ci.yml/badge.svg)](https://github.com/LeilaoMi/preferred-sub-generator/actions/workflows/ci.yml)
 
-给 cmliu 版 edgetunnel 用的**国内实测**优选 IP 订阅器，部署在 Cloudflare Pages，全部维护都能在手机上完成。
+给 cmliu 版 [edgetunnel](https://github.com/cmliu/edgetunnel) 用的**国内实测**优选 IP 订阅器。部署在 Cloudflare Pages，靠 GitHub Actions 定时跑，日常维护在手机上就能做完。
 
-它只做一件事：**从中国大陆电信、联通、移动三张网真实测过，挑出连得上你节点的 Cloudflare IP，按固定顺序输出给 edgetunnel。** 你的 UUID、域名、路径等节点参数由 edgetunnel 自己保管，本项目不需要也拿不到。
+它只做一件事：**用中国大陆电信、联通、移动三张网真实测过，挑出连得上你节点的 Cloudflare IP，按固定顺序交给 edgetunnel。** UUID、域名、路径这些节点参数由 edgetunnel 自己保管，本项目不需要，也拿不到。
 
-## 它和普通优选器有什么不同
+## 一图看懂
+
+```text
+GitHub Actions（定时）
+ ├─ Update        每 6 小时：汇总 CF 官方段 + 社区源，官方段先在美国初筛 → 候选池（KV）
+ ├─ China Probe   每 2 小时：Globalping 国内三网探针实测候选池，并入手机实测 → 实测记录 + 国内已验证快照
+ └─ Host Check    每 6 小时：三网体检你的域名，前几名 IP × 域名组合测（识别 1034 / 重置 / 落地机房）
+                         │
+手机 cf-termux-pick ─────┘（可选：你自己线路上的实测，回传进 China Probe）
+
+Cloudflare Pages ── /sub ──> edgetunnel（sub://你的域名）──> 客户端
+                   按运营商排序，永远 200，出错用快照兜底
+```
+
+## 和普通优选器的区别
 
 | | 普通优选器 | 本项目 |
 |---|---|---|
-| 在哪测 | 美国服务器 / 浏览器 | GitHub Actions 调用 [Globalping](https://globalping.io) 的**国内三网探针** |
-| 测什么 | TCP 延迟 | TCP 延迟 + **IP × 你的域名组合测**（识别 1034、连接重置），并记录落地机房 |
-| 分运营商 | 否 | 电信、联通、移动各一份排名 |
-| 顺序 | 每次随机 | 固定顺序，带抗抖动，不会每次乱换 |
+| 在哪测 | 美国服务器 / 浏览器 | [Globalping](https://globalping.io) 的**国内三网探针**，外加你手机的实测 |
+| 测什么 | TCP 延迟 | TCP 延迟 + **IP × 你的域名组合测**，并记录国内实际落地机房 |
+| 分运营商 | 否 | 电信、联通、移动各一份排名，各一个订阅地址 |
+| 顺序 | 每次随机 | 固定顺序，带抗抖动 |
 | 实测失败时 | 返回空或随机 | 用最后一次国内验证通过的名单兜底 |
-| 域名被墙 | 不知道 | 每 6 小时三网体检你的域名，`/status` 可看 |
+| 域名被墙 | 不知道 | 定时三网体检，`/status` 可看 |
 
-## 快速开始（Fork 即用，零配置）
+## 快速开始（Fork 即用）
 
 1. **Fork** 本仓库，打开 fork 的 **Actions** 页，点「I understand my workflows, go ahead and enable them」。
-2. **Settings → Secrets and variables → Actions → Secrets** 里新建两个：
+2. **Settings → Secrets and variables → Actions → Secrets** 新建：
    - `CLOUDFLARE_ACCOUNT_ID`：Cloudflare 控制台右侧栏的账户 ID
-   - `CLOUDFLARE_API_TOKEN`：Cloudflare「我的个人资料 → API 令牌」创建，权限勾 **Cloudflare Pages：编辑**、**Workers KV 存储：编辑**（D1 可选）
+   - `CLOUDFLARE_API_TOKEN`：「我的个人资料 → API 令牌」创建，权限勾 **Cloudflare Pages：编辑**、**Workers KV 存储：编辑**（D1 可选）
+   - `GLOBALPING_TOKEN`（强烈建议）：[globalping.io](https://globalping.io) 免费注册，国内实测额度高很多
 3. Actions 页依次手动运行：**Deploy to Cloudflare Pages** → **Update Preferred Subscription** → **China Probe (Globalping)**。
 
-KV、D1、Pages 项目都会自动查找或创建，不用改任何文件。部署地址在 Cloudflare Pages 项目页里，形如 `https://preferred-sub-generator-xxx.pages.dev`。
-
-强烈建议再加一个 secret `GLOBALPING_TOKEN`（[globalping.io](https://globalping.io) 免费注册），国内实测额度会高很多。
+KV、D1、Pages 项目都会自动查找或创建，不用改文件。部署地址形如 `https://preferred-sub-generator-xxx.pages.dev`，在 Cloudflare Pages 项目页里能看到。
 
 ## 接到 edgetunnel
 
-在 cmliu 版 edgetunnel 面板的**自定义优选订阅**里填：
+在 edgetunnel 面板的**自定义优选订阅**里填：
 
 ```text
 sub://你的部署域名
 ```
 
-不要带 `?` 参数，edgetunnel 会把它们丢掉。要按运营商排序，请设置下面的 `SUB_DEFAULT_ISP`。
+**分运营商订阅**：给 Pages 项目再绑三个自定义域名 `ct.你的域名`、`cu.你的域名`、`cm.你的域名`（也认 `dx/lt/yd`），edgetunnel 里填 `sub://cu.你的域名` 这样，就按联通的国内实测排序。edgetunnel 会丢掉 `?` 参数但保留子域名，所以这是 `sub://` 里唯一能选运营商的办法。不绑子域名时，用 `SUB_DEFAULT_ISP` 指定默认运营商。
 
-**分运营商订阅**：给 Pages 项目多绑三个自定义域名 `ct.你的域名`、`cu.你的域名`、`cm.你的域名`（也认 `dx/lt/yd`），edgetunnel 里分别填 `sub://ct.你的域名` 等即可，各自按电信 / 联通 / 移动的国内实测排序。edgetunnel 会丢掉 `?` 参数但保留子域名，所以这是唯一能在 `sub://` 里选运营商的办法。
+容易踩的坑：
 
-两个容易踩的坑：
+- edgetunnel 面板的**「随机 IP」开关要关掉**。它默认开着，开着时完全不读你填的优选订阅。
+- `sub://` 后面不要加任何 `?` 参数（包括 `?proxyip=true`）。面板的「验证优选 API」可以预览返回的 IP。
+- 客户端请用**「自动选择 / url-test」组**，不要固定单个节点。国内到 Cloudflare 的单个 IP 时好时坏是常态，5G 上更明显。
 
-- edgetunnel 面板里的**「随机 IP」开关要关掉**。它默认开着，开着时 edgetunnel 只用自己随机取的 IP，完全不读你填的优选订阅。
-- 不要给 `sub://` 加 `?proxyip=true`。面板的「验证优选 API」可以预览本项目返回的 IP。
+edgetunnel 拉取时，本项目返回 30 个 IP，节点参数是占位值（全 0 UUID、`example.com`），edgetunnel 会换成自己的。请求永远返回 200 并缓存 5 分钟，因为 edgetunnel 遇到非 200 会塞一个 `127.0.0.1` 的假节点。
 
-本项目对 edgetunnel 的请求永远返回 200（出错时退回最后一次国内验证名单），并缓存 5 分钟，因为 edgetunnel 遇到非 200 会往订阅里塞一个 `127.0.0.1` 的假节点。
+## 节点名怎么读
 
-edgetunnel 拉取时，本项目返回 30 个 IP，节点参数用占位值（全 0 UUID、`example.com`），不会泄露你的任何信息；edgetunnel 会换上它自己的节点参数。
+节点名里的机房**只来自国内的实测**（Globalping 国内探针的组合测，或手机实测），不会用美国初筛看到的机房，因为同一个 IP 从美国和从国内连，落地机房往往不一样。
 
-**客户端请用「自动选择 / url-test」组，不要固定单个节点。** 国内到 Cloudflare 的单个 IP 时好时坏是常态，尤其在 5G 上；自动组会在某个 IP 超时时换到下一个。
+| 节点名示例 | 意思 |
+|---|---|
+| `🇯🇵 日本东京 NRT 95ms 实测 #1` | 国内实测落地在东京，延迟 95ms |
+| `🇨🇳 联通 119ms 实测 #2` | 联通网实测通过，但没拿到落地机房，不猜地点 |
+| `🌐 未实测 #3` | 这个 IP 没有带延迟的国内实测（手动置顶或兜底名单里的） |
+| `[IPv6] 🇭🇰 香港 HKG 60ms 实测 #4` | IPv6 节点 |
 
-## 安全设置
+Clash 的地区分组也按同一规则归类。
 
-- `/sub` 默认公开，但**匿名请求只能用 URL 里自带的节点参数**；服务端模板（`VLESS_*` 环境变量或 KV 里的 `TEMPLATE`）只对带只读 token（`?t=` 或 `Authorization: Bearer`）的请求生效，不会把 UUID 泄露给陌生人。想彻底关掉匿名访问，设 Pages 环境变量 `SUB_PUBLIC=0`。
-- 网页设置管理 token（`/setup.html`）需要先在 Cloudflare Pages 环境变量里设 `SETUP_CODE`（至少 8 位）并重新部署，设置时填这个码，防止别人抢先设置。直接配 `SUB_TOKEN` 环境变量的不受影响。
-- `/status` 对匿名访问只显示 `1***.example.com` 这样的打码域名，带只读 token 才显示全名。
-- 测速反馈里的访客 IP 只存加盐哈希（盐取 `IP_HASH_SALT`，没配就用 `SUB_TOKEN`），没法穷举反查。
-- 静态页面自带 `_headers`：禁止被 iframe 嵌入，并带 CSP。
-
-## 推荐配置
+## 配置
 
 全部是 **Actions → Variables**（不是 Secrets），手机浏览器就能填。不填也能跑，填了更准。
 
@@ -90,38 +103,43 @@ edgetunnel 拉取时，本项目返回 30 个 IP，节点参数用占位值（�
 
 </details>
 
-## 它怎么工作
+## 排序规则
 
-四个定时任务（北京时间；GitHub 的定时任务经常推迟几十分钟到几小时）：
-
-| 任务 | 频率 | 做什么 |
-|---|---|---|
-| Update Preferred Subscription | 每 6 小时（约 2:00 / 8:00 / 14:00 / 20:00） | 汇总 Cloudflare 官方段和社区源，美国初筛官方段 IP，写入 KV。cmliu 反代 IP 不做美国初筛，直接进待验证池等国内实测 |
-| China Probe | 每 2 小时 | 国内三网探针对池子做 TCP 实测（反代 IP 改做 HTTPS `/cdn-cgi/trace`，能到 Cloudflare 才算通），并入手机实测，写入实测记录和**国内已验证快照** |
-| China Host Check | 每天 3:50 / 9:50 / 15:50 / 21:50 | 三网 HTTPS 体检你的域名；对排名前几的 IP 做 IP × 域名组合测，拿到 1034 / 重置 / 落地机房 |
-| CI | 每次提交 | 跑全部测试 |
-
-订阅排序规则：
-
-1. 只采信最近 3 天的国内实测，24 小时半衰期，北京时间 20–23 点晚高峰的实测权重 ×1.5。手机 [cf-termux-pick](https://github.com/LeilaoMi/cf-termux-pick) 回传的实测也算：WiFi（自家宽带）×1.5，5G/4G ×1.2；开着 VPN 跑出来的结果不收。
-2. 延迟按 20ms 分档，失败率加罚，落地在香港、台湾、日本、新加坡、美西加分，绕到欧洲、美东加罚 80ms。
-3. 最近一次成功实测越旧越靠后（每 12 小时加罚 10ms，最多 60ms）；国内快照里的名单超过 7 天没更新就不再用来兜底。
-4. 国内实测 ok 的排前面，然后是 `sources/edge/manual.txt` 里的手动置顶，不足 10 个再用过审池补齐。
-5. 新鲜实测不够时，用最后一次国内验证通过的快照兜底，不会返回空订阅。
+1. 只采信最近 3 天的国内实测（`SUB_VERIFIED_DAYS`），24 小时半衰期，北京时间 20–23 点晚高峰的实测权重 ×1.5。
+2. 手机 [cf-termux-pick](https://github.com/LeilaoMi/cf-termux-pick) 回传的实测也算：WiFi（自家宽带）×1.5，5G/4G ×1.2；出口不在国内（开着 VPN）跑出来的不收。
+3. 延迟按 20ms 分档，失败率加罚；落地在香港、台湾、日本、新加坡、美西加分，绕到欧洲、美东加罚 80ms。
+4. 最近一次成功实测越旧越靠后（每 12 小时加罚 10ms，最多 60ms）；快照里超过 7 天没更新的名单不再用来兜底。
+5. 国内实测通过的排前面，然后是 `sources/edge/manual.txt` 里的手动置顶，不足 10 个再用过审池补齐。
 6. TLS 订阅只保留 TLS 端口（443、8443、2053、2083、2087、2096）。
+
+定时任务的时间（北京时间，GitHub 经常推迟几十分钟到几小时）：Update 约 2:00 / 8:00 / 14:00 / 20:00，China Probe 每 2 小时的半点，Host Check 3:50 / 9:50 / 15:50 / 21:50。CI 每次提交跑全部测试。
+
+## 手机实测
+
+Globalping 的国内探针多在家宽或机房，不等于你的手机网络。想让订阅贴合你自己的线路，用 [cf-termux-pick](https://github.com/LeilaoMi/cf-termux-pick) 在 Termux 里跑，结果推到它的仓库，本项目每轮 China Probe 自动拉取（地址见 `PHONE_RESULTS_URL`，仓库不存在就跳过）。
+
+另一种是本仓库自带的 `scripts/termux-probe.sh`，直接回传到你的部署（需要 D1 和管理 token），见 [docs/termux.md](docs/termux.md)。
 
 ## 看状态
 
-打开 `https://你的部署域名/status`（公开，不需要 token）：
+打开 `https://你的部署域名/status`：
 
-- `cnProbe`：最近一轮国内实测的时间、测了多少、成功多少、三网各有多少已验证节点。
-- `cnHosts`：每个域名在电信、联通、移动下是 `ok`、`unstable` 还是 `blocked`。
+- `cnProbe`：最近一轮国内实测的时间、测了多少、成功多少，三网各有多少已验证节点。
+- `cnHosts`：每个域名在电信、联通、移动下是 `ok`、`unstable` 还是 `blocked`。匿名访问时域名打码，带只读 token 显示全名。
 
-运营商一列显示 `blocked`，说明这个域名在这张网上被封了（通常是 SNI 层面），**换 IP 没用，只能换域名**。
+某个运营商显示 `blocked`，说明这个域名在这张网上被封了（通常是 SNI 层面），**换 IP 没用，只能换域名**。
+
+## 安全
+
+- `/sub` 默认公开，但**匿名请求只能用 URL 里自带的节点参数**；服务端模板（`VLESS_*` 环境变量或 KV 里的 `TEMPLATE`）只对带只读 token（`?t=` 或 `Authorization: Bearer`）的请求生效，不会把 UUID 泄露给陌生人。想彻底关掉匿名访问，设 Pages 环境变量 `SUB_PUBLIC=0`。
+- 网页设置管理 token（`/setup.html`）需要先在 Cloudflare Pages 环境变量里设 `SETUP_CODE`（至少 8 位）并重新部署，设置时填这个码，防止别人抢先设置。直接配 `SUB_TOKEN` 环境变量的不受影响。
+- `/status` 对匿名访问只显示 `1***.example.com` 这样的打码域名，带只读 token 才显示全名。
+- 测速反馈里的访客 IP 只存加盐哈希（盐取 `IP_HASH_SALT`，没配就用 `SUB_TOKEN`），没法穷举反查。
+- 静态页面自带 `_headers`：禁止被 iframe 嵌入，并带 CSP。
 
 ## 已知局限
 
-- **探针跑在宽带上，不等于你的手机网络。** Globalping 的国内探针多在家宽或机房，联通宽带能通的 IP，联通 5G 上可能不稳。可以用 [Termux 手机实测](docs/termux.md) 补充你自己网络的数据。
+- **探针跑在宽带上，不等于你的手机网络。** 联通宽带能通的 IP，联通 5G 上可能不稳，用上面的手机实测补。
 - **免费二级域名在移动网络上经常被封。** 实测（2026-10-13）`ccwu.cc` 子域名在移动下 10 个中 7 个被封，电信、联通正常。移动用户请准备不同后缀的备用域名。
 - **workers.dev 在国内三网都不可用**，不要拿来当节点域名。
 - **美国能通不代表国内能通。** 同一个 IP 配同一个域名，美国返回 200，国内可能返回 1034。
@@ -143,7 +161,6 @@ edgetunnel 拉取时，本项目返回 30 个 IP，节点参数用占位值（�
   - `singbox` 输出 sing-box 1.12+ 可直接导入的完整配置；只要出站列表用 `singbox-outbounds`。
   - Surge 不支持 VLESS，`surge` 输出的是 Trojan over WebSocket（edgetunnel 同一路径接受 Trojan，密码就是 UUID）。
   - 只支持 WebSocket 传输的节点。
-- **手机实测**：[docs/termux.md](docs/termux.md)
 - **完整 API、环境变量、历史设计**：[docs/reference.md](docs/reference.md)
 - **Cloudflare 手动配置**：[docs/cloudflare-setup.md](docs/cloudflare-setup.md)
 
