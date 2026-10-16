@@ -9,20 +9,24 @@ test("format COLO as Chinese location with flag", () => {
 });
 
 test("format edge node name never prints upstream scanner latency (honesty)", () => {
-  // 美国扫描机的延迟是 demo 数据，永远不印在名字里——没实测就只显示落点
-  assert.equal(formatEdgeNodeName({ colo: "SJC", latency: 34 }, 1), "🇺🇸 美国圣何塞 SJC #2");
+  // 美国扫描机的延迟和机房都不印在名字里（Anycast 下美国接入的机房不等于国内接入的）
+  assert.equal(formatEdgeNodeName({ colo: "SJC", latency: 34 }, 1), "🌐 未实测 #2");
   assert.equal(
     formatEdgeNodeName({ name: "🇺🇸 美国洛杉矶 LAX 12ms #3", colo: "LAX", latency: 12 }, 0),
-    "🇺🇸 美国洛杉矶 LAX #1",
+    "🌐 未实测 #1",
   );
   // 存量老名字也不再沿用，一律现生成
-  assert.equal(formatEdgeNodeName({ name: "优选-4", colo: "LAX", latency: null, userRtt: null }, 3), "🇺🇸 美国洛杉矶 LAX #4");
+  assert.equal(formatEdgeNodeName({ name: "优选-4", colo: "LAX", latency: null, userRtt: null }, 3), "🌐 未实测 #4");
 });
 
 test("format edge node name shows only locally measured rtt", () => {
   assert.equal(
     formatEdgeNodeName({ name: "旧名", colo: "LAX", latency: 12, userRtt: 33 }, 1),
-    "🇺🇸 美国洛杉矶 LAX 33ms 实测 #2",
+    "🇨🇳 国内 33ms 实测 #2",
+  );
+  assert.equal(
+    formatEdgeNodeName({ colo: "SEA", userRtt: 91, userRegion: "CN-CU" }, 3),
+    "🇨🇳 联通 91ms 实测 #4",
   );
 });
 
@@ -33,6 +37,6 @@ test("format edge node name prefers locally measured colo and rtt", () => {
   );
   assert.equal(
     formatEdgeNodeName({ colo: "LAX", latency: 40, userRtt: 0 }, 2),
-    "🇺🇸 美国洛杉矶 LAX 0ms 实测 #3",
+    "🇨🇳 国内 0ms 实测 #3",
   );
 });
