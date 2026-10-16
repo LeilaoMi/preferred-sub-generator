@@ -50,6 +50,8 @@ export function formatColo(colo) {
   return COLO_LABELS[code] ? `${COLO_LABELS[code]} ${code}` : `🌐 ${code}`;
 }
 
+const ISP_NAMES = { CT: "电信", CU: "联通", CM: "移动" };
+
 export function formatEdgeNodeName(node, index) {
   const measured = node.userRtt != null && Number.isFinite(Number(node.userRtt))
     ? Math.round(Number(node.userRtt))
@@ -60,7 +62,11 @@ export function formatEdgeNodeName(node, index) {
   // 美国扫描机的延迟（node.latency）是 demo 数据，印在名字里等于骗人——删掉。
   // 没实测过的节点只显示落点，不假装知道快慢。
   // 名字每次请求现生成，不沿用 KV 里存的老名字（老名字可能嵌着旧延迟）。
-  const location = formatColo(node.userColo || node.colo) || "🌐 未识别地区";
+  // 2026-10-16：地点只用国内端拿到的落地机房（HTTPS 组合测 / 手机实测）。
+  // 美国扫描机的 colo 是它自己接入的机房，Anycast 下和你从国内接入的完全可能不同（名字写西雅图、实际落香港），不再用。
+  // 没有国内机房时写运营商，不猜地点。
+  const isp = ISP_NAMES[String(node.userRegion || "").toUpperCase().replace(/^CN-/, "")] || "";
+  const location = formatColo(node.userColo) || (measured !== null ? (isp ? `🇨🇳 ${isp}` : "🇨🇳 国内") : "🌐 未实测");
   const latency = measured !== null ? ` ${measured}ms 实测` : "";
   return `${v6Prefix}${location}${latency} #${index + 1}`;
 }
