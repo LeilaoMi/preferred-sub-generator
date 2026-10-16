@@ -912,9 +912,6 @@ GitHub Actions 的运行机默认没有 IPv6 出口，无法连通 CF IPv6 边�
 
 想拿到你自己的落点和延迟，跑一次 `node scripts/probe-ips.js`（见「本地探测与线路过滤」），回传后节点名里的 COLO 和延迟就变成你实测的值，`colo=auto` 线路过滤也才有意义。
 
-## 📖 延伸阅读
-
-
 ## 相关文档
 
 ```text
