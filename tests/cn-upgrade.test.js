@@ -71,7 +71,7 @@ test("快照：按运营商分别排名，够用才覆盖", () => {
   assert.equal(merged.all.length, 12, "新快照太少时保留旧的");
   assert.equal(merged.CU.length, 1, "旧的更少时用新的");
   assert.equal(merged.CM[0].address, "8.8.8.8");
-  assert.deepEqual(snapshotList(merged, "CU").map((i) => i.address), ["1.0.0.1"]);
+  assert.deepEqual(snapshotList(merged, "CU", { now: NOW }).map((i) => i.address), ["1.0.0.1"]);
 });
 
 test("快照兜底：补进评分表和节点池，不覆盖已有实测", () => {
