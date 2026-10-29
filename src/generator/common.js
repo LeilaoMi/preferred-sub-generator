@@ -6,6 +6,17 @@ export function iniName(name) {
   return String(name).replace(/[,=\r\n]/g, " ").trim();
 }
 
+// INI 生成器里 address/host/sni/path/uuid 都是逗号分隔字段：
+// 含 CR/LF 可注入新行，含逗号可拆字段。合法域名/IP/路径/UUID 不含这两类字符，
+// 含它们的节点直接丢弃，而不是把整个订阅打断。
+export function hasIniBreaker(value) {
+  return /[\r\n,]/.test(String(value ?? ""));
+}
+
+export function isSafeIniNode(node) {
+  return !["address", "host", "sni", "path", "uuid"].some((key) => hasIniBreaker(node[key]));
+}
+
 export function nodeName(node, index) {
   return node.name || `优选-${index + 1}`;
 }

@@ -1,4 +1,4 @@
-import { iniName, nodeName, TEST_URL } from "./common.js";
+import { iniName, isSafeIniNode, nodeName, TEST_URL } from "./common.js";
 
 // Loon VLESS 语法（nsloon.app/docs/Node）：
 // 名称 = VLESS,服务器,端口,"UUID",transport=ws,path=/,host=域名,over-tls=true,sni=域名,skip-cert-verify=false
@@ -26,7 +26,9 @@ function buildProxy(template, override, index) {
 }
 
 export function generateLoonSubscription(template, nodes, options = {}) {
-  const proxies = nodes.map((node, index) => buildProxy(template, node, index));
+  const proxies = nodes
+    .filter((node) => isSafeIniNode({ ...template, ...node }))
+    .map((node, index) => buildProxy(template, node, index));
   const names = proxies.map((proxy) => proxy.name);
   const lines = ["[Proxy]", ...proxies.map((proxy) => proxy.line), "", "[Proxy Group]"];
   if (names.length === 0) {

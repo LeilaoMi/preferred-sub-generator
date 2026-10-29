@@ -152,14 +152,17 @@ async function fetchOwnLoc(timeoutMs) {
   }
 }
 
-async function fetchReadToken(site, token) {
+export async function fetchReadToken(site, token) {
   const response = await fetch(`${site}/api/read-token`, { headers: { Authorization: `Bearer ${token}` } });
   const data = await response.json().catch(() => ({}));
-  return data.readToken || token;
+  // 未配置只读 token 时服务端只返回 { configured: false }，此时绝不能把管理 token
+  // 当成只读 token 回退：它会被拼进 /best?t= 与打印的订阅 URL，造成管理 token 泄露。
+  return data.readToken || "";
 }
 
 async function fetchNodes(site, readToken, count, { pool = false } = {}) {
-  const response = await fetch(`${site}/best?n=${count}${pool ? "&rank=off" : ""}&t=${encodeURIComponent(readToken)}`);
+  const tokenQuery = readToken ? `&t=${encodeURIComponent(readToken)}` : "";
+  const response = await fetch(`${site}/best?n=${count}${pool ? "&rank=off" : ""}${tokenQuery}`);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(`拉取优选列表失败 ${response.status}: ${data.error || "unknown"}`);
@@ -372,7 +375,8 @@ async function main() {
   }
   const data = { saved, storage };
   console.log(`已回传 ${data.saved} 条实测数据（可用 ${alive.length} / 不可用 ${unreachable.length}，${data.storage}）。`);
-  console.log(`订阅地址（按你的实测重排）: ${site}/sub?type=v2rayng&t=${readToken}`);
+  const subUrl = readToken ? `${site}/sub?type=v2rayng&t=${readToken}` : `${site}/sub?type=v2rayng`;
+  console.log(`订阅地址（按你的实测重排）: ${subUrl}`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
