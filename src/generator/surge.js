@@ -1,4 +1,4 @@
-import { iniName, nodeName, TEST_URL } from "./common.js";
+import { iniName, isSafeIniNode, nodeName, TEST_URL } from "./common.js";
 
 // Surge 不支持 VLESS（官方协议列表里没有），所以输出 Trojan over WebSocket。
 // cmliu edgetunnel 在同一个 WS 路径上接受 Trojan，密码就是 UUID（服务端比对 sha224(UUID)）。
@@ -20,7 +20,9 @@ function buildProxy(template, override, index) {
 }
 
 export function generateSurgeSubscription(template, nodes, options = {}) {
-  const proxies = nodes.map((node, index) => buildProxy(template, node, index));
+  const proxies = nodes
+    .filter((node) => isSafeIniNode({ ...template, ...node }))
+    .map((node, index) => buildProxy(template, node, index));
   const names = proxies.map((proxy) => proxy.name);
   const lines = ["[Proxy]", ...proxies.map((proxy) => proxy.line), "", "[Proxy Group]"];
   if (names.length === 0) {

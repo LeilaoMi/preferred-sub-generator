@@ -181,6 +181,14 @@ export function isRelaySource(source) {
   return String(source || "").startsWith("cmliu");
 }
 
+// 池上限语义：手动条目保留，但总数不能超 poolLimit；超出的部分砍排名最低的
+// 非手动条目，而不是让池子变成 300 + 手动条数（线上曾出现 304 条）。
+export function capPoolWithManual(items, poolLimit) {
+  const manual = items.filter((item) => item.source === "edge-manual");
+  const scanned = items.filter((item) => item.source !== "edge-manual");
+  return [...scanned.slice(0, Math.max(0, poolLimit - manual.length)), ...manual.slice(0, poolLimit)];
+}
+
 export async function buildUpdatePayload({
   nodeConfig,
   manualText,
@@ -231,7 +239,7 @@ export async function buildUpdatePayload({
   });
   console.log(`US prefilter done: ${checked.length} reachable in ${Math.round((Date.now() - startedAt) / 1000)}s`);
   const allAggregated = aggregateCheckedResults(checked);
-  const aggregated = allAggregated.slice(0, poolLimit);
+  let aggregated = allAggregated.slice(0, poolLimit);
   // 手动置顶（manual.txt）是你在国内确认能用的 IP/域名：美国扫描机连不上也保留（标记未过审），
   // 订阅时排在实测节点之后、补齐节点之前。
   // 只补回"扫描没过审"的手动条目；过审但被池上限截掉的不补，保持上限语义
@@ -242,6 +250,7 @@ export async function buildUpdatePayload({
     const port = Number(candidate.port) || 443;
     aggregated.push({ address: candidate.address, port, ports: [port], latency: null, speed: null, colo: "", edgeVerified: false, source: "edge-manual", jitter: null });
   }
+  aggregated = capPoolWithManual(aggregated, poolLimit);
   // P1-8: 第二轮抖动采样——只对入池候选的优选端口测 3 次，不对全量候选 3 倍探测
   const jitterSamples = await checkCandidates(
     aggregated.map((item) => ({ address: item.address, port: item.port, source: item.source })),

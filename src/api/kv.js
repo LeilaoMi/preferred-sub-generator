@@ -38,11 +38,16 @@ export async function readPendingCnIps(kv) {
 }
 
 // P2-6: 未实测 IPv6 独立池
+// IPv6 只是追加节点：KV 损坏时降级为空列表，不能拖垮整条订阅。
 export async function readBestIpsV6(kv) {
-  const value = await kv.get("BEST_IPS_V6");
-  if (!value) return [];
-  const parsed = JSON.parse(value);
-  return Array.isArray(parsed) ? parsed : [];
+  try {
+    const value = await kv.get("BEST_IPS_V6");
+    if (!value) return [];
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 export async function readBestIpsVersion(kv, version) {
@@ -55,14 +60,22 @@ export async function readBestIpsVersion(kv, version) {
 }
 
 export async function readBestIpVersions(kv) {
-  const value = await kv.get("BEST_IPS_VERSION_INDEX");
-  if (!value) return [];
-  const parsed = JSON.parse(value);
-  return Array.isArray(parsed) ? parsed : [];
+  try {
+    const value = await kv.get("BEST_IPS_VERSION_INDEX");
+    if (!value) return [];
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 export async function readStatus(kv) {
-  const value = await kv.get("STATUS");
-  if (!value) return { updatedAt: null, available: 0 };
-  return JSON.parse(value);
+  try {
+    const value = await kv.get("STATUS");
+    if (!value) return { updatedAt: null, available: 0 };
+    return JSON.parse(value);
+  } catch {
+    return { updatedAt: null, available: 0 };
+  }
 }

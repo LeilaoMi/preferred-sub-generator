@@ -84,7 +84,7 @@ UPDATE_WEBHOOK_URL         告警 Webhook，仅状态变化/恶化/恢复/运行
 
 安全边界：
 
-- `/sub`、`/best`、`/versions` 默认需要只读 token。
+- `/sub`、`/best`、`/versions` 默认公开（匿名只能用 URL 自带参数）；设 `SUB_PUBLIC=0` 后才需要只读 token。
 - `/api/read-token` 默认只返回 `{ configured }`；带 `Authorization: Bearer <SUB_TOKEN>` 才返回 `SUB_READ_TOKEN` 的值，目的是让首页生成可直接导入客户端的订阅 URL，同时避免匿名访客拉走只读 token。
 - `/api/template` 和 `/health/full` 使用管理 token `SUB_TOKEN`，默认只接受 `Authorization: Bearer <SUB_TOKEN>`。
 - 管理 token 不要拼进 URL，也不要给客户端订阅使用。
@@ -99,7 +99,7 @@ CLOUDFLARE_ACCOUNT_ID     Cloudflare Account ID
 CLOUDFLARE_NAMESPACE_ID   KV Namespace ID
 ```
 
-原始 VLESS 节点通过网页输入并保存到 Cloudflare KV 的 `TEMPLATE`，不要写进 GitHub Secrets 或仓库文件。
+原始 VLESS 节点通过首页本地粘贴生成订阅链接，不要写进 GitHub Secrets 或仓库文件；`/api/template` POST 已停用（410），旧版“网页保存到 KV 的 `TEMPLATE`”流程已作废。
 
 ## 5. 本地验证
 

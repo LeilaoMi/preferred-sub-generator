@@ -28,7 +28,10 @@ export function checkWranglerToml(content) {
   if (!content.includes('binding = "SUB_KV"')) {
     issues.push("wrangler.toml 缺少 SUB_KV 绑定");
   }
-  if (content.includes("replace_with_cloudflare_kv_namespace_id")) {
+  if (
+    content.includes("replace_with_cloudflare_kv_namespace_id") ||
+    content.includes("replace_with_your_cloudflare_kv_namespace_id")
+  ) {
     issues.push("wrangler.toml 的 KV Namespace ID 仍是占位符");
   }
   return issues;
