@@ -21,6 +21,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # 部署只发 main：workflow_dispatch 从任意分支触发时也不能把该分支内容推到 main 别名
+          ref: main
 
       - name: Set up Node.js
         uses: actions/setup-node@v4

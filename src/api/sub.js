@@ -45,8 +45,14 @@ function getLimit(url, total) {
   return Math.min(requested, MAX_NODES, total);
 }
 
-function normalizeNodes(nodes) {
-  return nodes.map((node, index) => ({ ...node, name: formatEdgeNodeName(node, index) }));
+export function normalizeNodes(nodes) {
+  return nodes.map((node, index) => {
+    // 端口无整数/范围校验时，99999 这类非法端口会原样发给客户端导致该节点必死；
+    // 非法端口统一回落到 443（CF 边缘标准端口），而不是丢弃整个节点。
+    const port = Number(node.port);
+    const safePort = Number.isInteger(port) && port >= 1 && port <= 65535 ? port : 443;
+    return { ...node, port: safePort, name: formatEdgeNodeName(node, index) };
+  });
 }
 
 function generateVlessSubscription(template, nodes) {

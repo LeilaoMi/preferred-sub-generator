@@ -18,6 +18,8 @@ export function maskHost(host) {
   const parts = value.split(".");
   if (parts.length < 2) return "***";
   const head = parts[0];
+  // 两段域名时尾部就是完整域名（secret.com -> s***.secret.com 等于没打码），只留 TLD。
+  if (parts.length === 2) return `${head.slice(0, 1)}***.${parts[1]}`;
   const tail = parts.slice(-2).join(".");
   return `${head.slice(0, 1)}***.${tail}`;
 }

@@ -23,7 +23,14 @@ function normalizeAddress(value) {
 
 export function isIPv6(value) {
   const normalized = normalizeAddress(value);
-  return normalized.includes(":") && /^[0-9a-fA-F:.]+$/.test(normalized);
+  // 最小修复：:::: 这类全空组不是合法 IPv6，之前仅凭字符集会放行。
+  // 完整严格校验不在本 PR 范围，仍以字符集 + 至少一位十六进制 + 不含连续三冒号为准。
+  return (
+    normalized.includes(":") &&
+    /[0-9a-fA-F]/.test(normalized) &&
+    /^[0-9a-fA-F:.]+$/.test(normalized) &&
+    !normalized.includes(":::")
+  );
 }
 
 function isIPv4(value) {
