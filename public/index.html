@@ -264,7 +264,7 @@
         uuid: decodeURIComponent(url.username),
         sni: params.sni || params.peer || "",
         host: params.host || "",
-        path: params.path ? decodeURIComponent(params.path) : "",
+        path: params.path || "",
         port: url.port ? Number(url.port) : 443,
         type: params.type || "ws",
         security: params.security || "tls",
