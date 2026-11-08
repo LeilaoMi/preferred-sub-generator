@@ -208,3 +208,4 @@ npm run validate:sources  # 检查候选源
 | [eooce/Merge-sub](https://github.com/eooce/Merge-sub) | URL 解析重组的 IP 替换方式 |
 
 本项目基于 MIT 协议开源（见 [LICENSE](LICENSE)）。
+<!-- CodeRabbit config verification test PR (2026-11-08): do not merge -->
