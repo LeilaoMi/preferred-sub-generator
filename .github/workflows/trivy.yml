@@ -1,0 +1,45 @@
+name: Trivy
+# Pilot: filesystem scan (dependency vulnerabilities) + config scan
+# (Dockerfile / IaC misconfigurations). Report-only: exit-code 0,
+# results go to code scanning as SARIF, nothing blocks the PR.
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+  security-events: write
+jobs:
+  trivy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Trivy filesystem scan
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: CRITICAL,HIGH
+          format: sarif
+          output: trivy-fs.sarif
+          exit-code: '0'
+      - name: Upload Trivy fs results to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-fs.sarif
+          category: trivy-fs
+      - name: Trivy config scan
+        uses: aquasecurity/trivy-action@0.36.0
+        with:
+          scan-type: config
+          severity: CRITICAL,HIGH
+          format: sarif
+          output: trivy-config.sarif
+          exit-code: '0'
+      - name: Upload Trivy config results to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy-config.sarif
+          category: trivy-config
