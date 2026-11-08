@@ -9,6 +9,9 @@ name: Semgrep
 # install semgrep, the job must fail loudly instead of silently
 # reporting "no findings" (the scan step below already tolerates scan
 # failures via continue-on-error, and the upload step is guarded).
+# Upload additionally requires the scan step to have succeeded
+# (steps.scan.outcome == 'success'): a failed scan must not upload
+# a stale or partial SARIF.
 on:
   push:
     branches: [main]
@@ -42,7 +45,7 @@ jobs:
             echo "non_empty=false" >> "$GITHUB_OUTPUT"
           fi
       - name: Upload Semgrep results to code scanning
-        if: ${{ always() && hashFiles('semgrep.sarif') != '' && steps.sarif-check.outputs.non_empty == 'true' }}
+        if: ${{ always() && steps.scan.outcome == 'success' && hashFiles('semgrep.sarif') != '' && steps.sarif-check.outputs.non_empty == 'true' }}
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: semgrep.sarif

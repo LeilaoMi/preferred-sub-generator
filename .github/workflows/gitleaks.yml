@@ -14,7 +14,10 @@ name: Gitleaks
 #   introduced by merge resolution shows up in the history scan, and a
 #   `gitleaks dir` scan of the checked-out tree catches any secret present
 #   in the current snapshot. A found leak fails the check by design and
-#   needs human triage.
+#   needs human triage. PR comments from the incremental action are
+#   disabled (GITLEAKS_ENABLE_COMMENTS=false): comment bodies can
+#   contain unescaped filenames; leaks still fail the job and surface
+#   via code scanning.
 on:
   push:
     branches: [main]
@@ -40,6 +43,11 @@ jobs:
       - uses: gitleaks/gitleaks-action@v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PR comments are disabled: comment bodies can contain
+          # unescaped filenames (CodeRabbit review). A found leak still
+          # fails this job, and the full-history job below uploads
+          # SARIF to code scanning, so nothing is lost silently.
+          GITLEAKS_ENABLE_COMMENTS: 'false'
   gitleaks-full-history:
     runs-on: ubuntu-latest
     steps:
@@ -67,7 +75,11 @@ jobs:
         run: gitleaks dir . --redact --report-format sarif --report-path gitleaks-tree.sarif
       - name: Upload Gitleaks working-tree results to code scanning
         if: ${{ always() && hashFiles('gitleaks-tree.sarif') != '' }}
-        uses: github/codeql-action/upload-sarif@v4
+        # Pinned to the full commit SHA of the v4 tag
+        # (33d7b85da1a04171e211befe2c739303b9a4c066, verified via the
+        # codeql-action v4 tag ref); other upload-sarif steps in this
+        # repo intentionally stay on the @v4 tag.
+        uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066
         with:
           sarif_file: gitleaks-tree.sarif
           category: gitleaks-tree
