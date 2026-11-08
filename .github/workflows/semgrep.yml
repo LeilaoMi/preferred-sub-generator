@@ -1,0 +1,27 @@
+name: Semgrep
+# Pilot: static code scanning, report-only (does not block PRs).
+# Note: semgrep-action wrapper is deprecated upstream; this uses the
+# native CLI (pip install semgrep + `semgrep scan --config auto`),
+# no Semgrep AppSec Platform token required.
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+  security-events: write
+jobs:
+  semgrep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Install Semgrep
+        run: pip install semgrep
+      - name: Run Semgrep (config auto)
+        continue-on-error: true
+        run: semgrep scan --config auto --metrics=off --sarif --output semgrep.sarif
+      - name: Upload Semgrep results to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: semgrep.sarif
