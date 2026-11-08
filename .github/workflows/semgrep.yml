@@ -19,7 +19,7 @@ jobs:
         run: pip install semgrep
       - name: Run Semgrep (config auto)
         continue-on-error: true
-        run: semgrep scan --config auto --metrics=off --sarif --output semgrep.sarif
+        run: semgrep scan --config auto --sarif --output semgrep.sarif
       - name: Upload Semgrep results to code scanning
         if: always()
         uses: github/codeql-action/upload-sarif@v4
