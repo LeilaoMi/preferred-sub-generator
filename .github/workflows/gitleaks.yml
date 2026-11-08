@@ -16,11 +16,18 @@ on:
   pull_request:
 permissions:
   contents: read
-  pull-requests: write
   security-events: write
 jobs:
   gitleaks:
     runs-on: ubuntu-latest
+    # pull-requests: write is scoped to this job only: it is the one
+    # that comments on the PR when a leak is found. Job-level
+    # permissions replace the workflow-level set for this job, so the
+    # other two permissions are repeated here.
+    permissions:
+      contents: read
+      pull-requests: write
+      security-events: write
     steps:
       - uses: actions/checkout@v7.0.1
         with:

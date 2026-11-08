@@ -30,8 +30,19 @@ jobs:
       - name: Warn if Semgrep scan failed
         if: steps.scan.outcome == 'failure'
         run: echo "::warning::Semgrep scan failed; no complete results were produced. See the 'Run Semgrep' step log."
+      # hashFiles returns a hash even for an empty file, so also verify
+      # the SARIF is non-empty before uploading.
+      - name: Check SARIF is non-empty
+        id: sarif-check
+        if: always()
+        run: |
+          if [ -s semgrep.sarif ]; then
+            echo "non_empty=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "non_empty=false" >> "$GITHUB_OUTPUT"
+          fi
       - name: Upload Semgrep results to code scanning
-        if: ${{ always() && hashFiles('semgrep.sarif') != '' }}
+        if: ${{ always() && hashFiles('semgrep.sarif') != '' && steps.sarif-check.outputs.non_empty == 'true' }}
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: semgrep.sarif

@@ -2,6 +2,8 @@ name: Trivy
 # Pilot: filesystem scan (dependency vulnerabilities) + config scan
 # (Dockerfile / IaC misconfigurations). Report-only: exit-code 0,
 # results go to code scanning as SARIF, nothing blocks the PR.
+# The two scans run as independent jobs so a failure in the fs scan
+# (or its SARIF upload) cannot skip the config scan, and vice versa.
 on:
   push:
     branches: [main]
@@ -10,7 +12,7 @@ permissions:
   contents: read
   security-events: write
 jobs:
-  trivy:
+  trivy-fs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7.0.1
@@ -30,6 +32,10 @@ jobs:
         with:
           sarif_file: trivy-fs.sarif
           category: trivy-fs
+  trivy-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
       - name: Trivy config scan
         uses: aquasecurity/trivy-action@v0.36.0
         with:
