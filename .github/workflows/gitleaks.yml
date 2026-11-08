@@ -1,0 +1,21 @@
+name: Gitleaks
+# Pilot: detect hardcoded secrets in full git history and code.
+# fetch-depth: 0 so history is scanned, not just the latest commit.
+# A found leak fails this check by design and needs human triage.
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+  security-events: write
+jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
