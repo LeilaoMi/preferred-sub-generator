@@ -1,13 +1,22 @@
 name: Gitleaks
-# Pilot: detect hardcoded secrets in full git history and code.
-# fetch-depth: 0 so history is scanned, not just the latest commit.
-# A found leak fails this check by design and needs human triage.
+# Pilot: detect hardcoded secrets in git history and code.
+# Two jobs:
+# - gitleaks (incremental): gitleaks-action v3 scans the PR/push commit
+#   range and comments on the PR when it finds a leak.
+# - gitleaks-full-history: runs the gitleaks CLI directly over the whole
+#   history reachable from HEAD (no --log-opts range), so a leak in an old
+#   commit is caught even when it is outside the current PR/push range,
+#   and a PR with more than 30 commits is fully covered -- the action
+#   only reads the first page of the PR commit list, this job does not
+#   use the PR commit list at all. A found leak fails the check by
+#   design and needs human triage.
 on:
   push:
     branches: [main]
   pull_request:
 permissions:
   contents: read
+  pull-requests: write
   security-events: write
 jobs:
   gitleaks:
@@ -19,3 +28,25 @@ jobs:
       - uses: gitleaks/gitleaks-action@v3.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  gitleaks-full-history:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install Gitleaks v8.30.1
+        run: |
+          curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz -o /tmp/gitleaks.tar.gz
+          curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_checksums.txt -o /tmp/gitleaks_checksums.txt
+          cd /tmp && sha256sum -c gitleaks_8.30.1_checksums.txt --ignore-missing
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
+          sudo install -m 755 /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: Scan full git history
+        run: gitleaks git . --redact --report-format sarif --report-path gitleaks-full.sarif
+      - name: Upload Gitleaks full-history results to code scanning
+        if: ${{ always() && hashFiles('gitleaks-full.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: gitleaks-full.sarif
+          category: gitleaks-full-history
