@@ -282,6 +282,8 @@ async function buildSub(request, env, url, edgeProbe) {
       const countOk = () => nodes.filter((node) => isMeasuredOk(scores?.get(node.address), dropMs)).length;
       if (countOk() < floor) {
         ({ nodes, scores } = applySnapshotFallback(nodes, scores, snapshotList(await readSnapshot(env.SUB_KV, CN_VERIFIED_KEY), isp), { penalty: 50, source: "cn-snapshot" }));
+        // 先过白名单再判断够不够，免得白名单外的快照节点把社区池兜底挡掉
+        scores = applyLandingToScores(scores, landing);
       }
       if (countOk() < floor) {
         ({ nodes, scores } = applySnapshotFallback(nodes, scores, snapshotList(await readSnapshot(env.SUB_KV, CN_COMMUNITY_KEY).catch(() => null), isp), { penalty: 1000, source: "cn-community" }));

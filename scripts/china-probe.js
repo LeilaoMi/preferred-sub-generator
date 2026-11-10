@@ -136,11 +136,14 @@ export function subnetKey(address) {
   return m ? m[1] : null;
 }
 
-export function subnetStats(entries) {
+export function subnetStats(entries, now = Date.now()) {
+  const since = new Date(now - KEEP_MS).toISOString();
   const tested = new Map();
   const ok = new Map();
   for (const e of Array.isArray(entries) ? entries : []) {
     if (!String(e?.clientHash || "").startsWith("globalping")) continue;
+    // KV 里的记录两轮之间可能已过期，只统计近 3 天的
+    if (typeof e?.at !== "string" || e.at < since) continue;
     const key = subnetKey(e?.address);
     if (!key) continue;
     (tested.get(key) || tested.set(key, new Set()).get(key)).add(e.address);
@@ -159,10 +162,10 @@ const GOOD_SUBNET_SHARE = 1 / 3;
 
 // 选目标：手动置顶 + 上次国内 ok 的（保持新鲜）优先；再给「有 IP 通过的 /24」里没测过的 IP 一份额度；
 // 其余按游标轮转，死网段只留少量探索额度，省下的额度给别的网段，保证整池定期都被测到
-export function pickTargets(pool, previousEntries, cursor, budget, { skipPorts = NON_TLS_PORTS, mode = "ping" } = {}) {
+export function pickTargets(pool, previousEntries, cursor, budget, { skipPorts = NON_TLS_PORTS, mode = "ping", now = Date.now() } = {}) {
   const okBefore = new Set(previousEntries.filter((e) => e.ok).map((e) => e.address));
   const testedBefore = new Set(previousEntries.map((e) => e.address));
-  const stats = subnetStats(previousEntries);
+  const stats = subnetStats(previousEntries, now);
   const isDead = (address) => {
     const st = stats.get(subnetKey(address));
     return Boolean(st) && st.tested >= DEAD_MIN_TESTED && st.ok === 0;
@@ -191,17 +194,20 @@ export function pickTargets(pool, previousEntries, cursor, budget, { skipPorts =
   const start = ipOnly.length ? cursor % ipOnly.length : 0;
   const rotated = [...ipOnly.slice(start), ...ipOnly.slice(0, start)];
   let deadLeft = Math.max(1, Math.floor(budget * DEAD_EXPLORE_SHARE));
-  let advanced = 0;
-  for (const node of rotated) {
+  // 游标推进到本轮最后一个测到的位置之后：扫完整池没填满预算（比如全是死网段）时，
+  // 下轮也会从新位置开始，不会反复测排在最前面的同一个 IP
+  let lastPicked = -1;
+  for (let i = 0; i < rotated.length; i++) {
     if (out.length >= budget) break;
-    advanced += 1;
+    const node = rotated[i];
     if (isDead(node.address) && !seen.has(node.address)) {
       if (deadLeft <= 0) continue;
-      if (push(node)) deadLeft -= 1;
+      if (push(node)) { deadLeft -= 1; lastPicked = i; }
       continue;
     }
-    push(node);
+    if (push(node)) lastPicked = i;
   }
+  const advanced = lastPicked >= 0 ? lastPicked + 1 : rotated.length;
   return { targets: out, nextCursor: ipOnly.length ? (start + advanced) % ipOnly.length : 0 };
 }
 
@@ -350,7 +356,7 @@ export async function runChinaProbe({ kv, fetchImpl = fetch, token = "", budget 
   const remaining = await readRemainingCredits({ fetchImpl, token });
   const effectiveBudget = adaptBudget(budget, remaining, { perTarget: ISP_LOCATIONS.length });
   if (remaining !== null) console.log(`Globalping 剩余额度 ${remaining}，本轮预算 ${effectiveBudget}/${budget}`);
-  const { targets, nextCursor } = pickTargets(pool, previous, Number(state.cursor) || 0, effectiveBudget, { mode });
+  const { targets, nextCursor } = pickTargets(pool, previous, Number(state.cursor) || 0, effectiveBudget, { mode, now: now.getTime() });
   console.log(`池 ${pool.length} 个，本轮国内三网实测 ${targets.length} 个（${mode === "http" ? "HTTPS trace" : "TCP ping"}${landing ? `，落地限 ${[...landing].length} 个机房` : ""}）`);
 
   const fresh = [];
