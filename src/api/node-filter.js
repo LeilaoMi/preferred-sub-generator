@@ -220,7 +220,8 @@ export function selectVerifiedNodes(nodes, scores, { limit, minNodes, env = {}, 
   // fill=false（开了落地白名单）：没实测过的节点证明不了落地，不拿来补位
   const filler = fill && verified.length < floor ? rest.slice(0, floor - verified.length) : [];
   let result = [...verified, ...filler];
-  // 全部被判死时保留原列表，订阅不断流
+  // 全部被判死时保留原列表，订阅不断流（开了白名单也一样：稳定优先，空订阅比落地不符更糟；
+  // 实际很少走到这里，前面有落地合格的国内快照兜底）
   if (result.length === 0) result = list.slice();
   return result.slice(0, cap);
 }

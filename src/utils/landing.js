@@ -50,7 +50,11 @@ export function resolveLanding(env = process.env) {
 export function workerLanding(env = {}, state = null) {
   const fromEnv = parseLandingColos(env?.SUB_LANDING);
   if (fromEnv) return fromEnv;
-  return Array.isArray(state?.landing) ? parseLandingColos(state.landing.join(",")) : null;
+  if (!Array.isArray(state?.landing) || state.landing.length === 0) return null;
+  const parsed = parseLandingColos(state.landing.filter((c) => typeof c === "string").join(","));
+  // 探针写了白名单但一个都解析不出来：说明数据坏了，记一笔再按不限处理
+  if (!parsed) console.log("CN_PROBE_STATE.landing 无法解析，落地白名单未生效");
+  return parsed;
 }
 
 /**
