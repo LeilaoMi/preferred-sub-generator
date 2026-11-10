@@ -186,11 +186,21 @@ export async function fetchCommunityPool(url, { fetchImpl = fetch, timeoutMs = 1
 }
 
 // 用全部国内实测重算快照，够用才覆盖（scripts/china-host-check.js 也调用）
-export async function refreshSnapshot({ kv, fetchImpl, entries, pool, now = Date.now() }) {
+// 落地白名单变了（比如刚开 SUB_LANDING=US），旧快照是按旧规则选的，不能再拿来兜底
+export function landingKey(landing) {
+  return landing ? [...landing].sort().join(",") : "";
+}
+
+export async function refreshSnapshot({ kv, fetchImpl, entries, pool, now = Date.now(), landing = null }) {
   const raw = await readKvValue({ ...kv, key: CN_VERIFIED_KEY, fetchImpl });
   let previous = null;
   try { previous = raw ? JSON.parse(raw) : null; } catch { previous = null; }
-  const snapshot = mergeSnapshot(previous, buildVerifiedSnapshot(entries, pool, { now }));
+  const key = landingKey(landing);
+  if (previous && (previous.landing || "") !== key) {
+    console.log("落地白名单变了，丢弃旧快照");
+    previous = null;
+  }
+  const snapshot = { ...mergeSnapshot(previous, buildVerifiedSnapshot(entries, pool, { now })), landing: key };
   await writeKvValue({ ...kv, key: CN_VERIFIED_KEY, value: JSON.stringify(snapshot), fetchImpl });
   return snapshot;
 }
@@ -337,7 +347,7 @@ export async function runChinaProbe({ kv, fetchImpl = fetch, token = "", budget 
   if (fresh.length > 0 || phone.length > 0 || kept.length !== previous.length) {
     const merged = mergeEntries(kept, [...fresh, ...phone], now.getTime());
     await writeKvValue({ ...kv, key: CN_PROBE_KEY, value: JSON.stringify(merged), fetchImpl });
-    const snapshot = await refreshSnapshot({ kv, fetchImpl, entries: merged, pool, now: now.getTime() });
+    const snapshot = await refreshSnapshot({ kv, fetchImpl, entries: merged, pool, now: now.getTime(), landing });
     verified = { all: snapshot.all.length, CT: snapshot.CT.length, CU: snapshot.CU.length, CM: snapshot.CM.length };
     console.log(`国内已验证快照：综合 ${verified.all} / 电信 ${verified.CT} / 联通 ${verified.CU} / 移动 ${verified.CM}`);
   }

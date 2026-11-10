@@ -60,3 +60,20 @@ test("parseScrape 从网页/JSON 抠 IPv4", () => {
   assert.deepEqual(parseScrape(html, "w").map((c) => c.address), ["104.16.1.1"]);
   assert.deepEqual(parseScrape(json, "v").map((c) => c.address), ["172.64.1.2"]);
 });
+
+test("落地白名单变化时丢弃旧快照", async () => {
+  const { refreshSnapshot, landingKey } = await import("../scripts/china-probe.js");
+  const old = { updatedAt: "2026-11-01T00:00:00.000Z", landing: "", all: [], CT: [], CU: Array.from({ length: 30 }, (_, i) => ({ address: `104.16.0.${i}`, rtt: 180 })), CM: [] };
+  let written = null;
+  const fetchImpl = async (url, init) => {
+    if (init?.method === "PUT") { written = JSON.parse(init.body); return new Response("{}"); }
+    return new Response(JSON.stringify(old));
+  };
+  const landing = parseLandingColos("US");
+  const now = Date.parse("2026-11-11T00:00:00Z");
+  const entries = [{ at: "2026-11-10T23:00:00.000Z", address: "104.17.1.1", port: 443, colo: "LAX", region: "CN-CU", rtt: 170, clientHash: "globalping-https:4837:x", ok: true }];
+  const snap = await refreshSnapshot({ kv: { accountId: "a", namespaceId: "n", apiToken: "t" }, fetchImpl, entries, pool: [], now, landing });
+  assert.equal(snap.landing, landingKey(landing));
+  assert.ok(!snap.CU.some((item) => item.address.startsWith("104.16.0.")));
+  assert.ok(written);
+});

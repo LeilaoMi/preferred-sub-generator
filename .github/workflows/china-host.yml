@@ -45,6 +45,7 @@ jobs:
           SUB_DOMAIN: ${{ vars.SUB_DOMAIN }}
           CN_COMBO_TOP: ${{ vars.CN_COMBO_TOP }}
           SUB_ROTATE_HOSTS: ${{ vars.SUB_ROTATE_HOSTS }}
+          SUB_LANDING: ${{ vars.SUB_LANDING }}
           ALERT_MIN_AVAILABLE: ${{ vars.ALERT_MIN_AVAILABLE }}
           UPDATE_WEBHOOK_URL: ${{ secrets.UPDATE_WEBHOOK_URL }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
