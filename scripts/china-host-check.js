@@ -10,6 +10,7 @@
 // 没配任何域名时，测订阅自己的域名（<Pages 项目>.pages.dev），零配置也有用。
 import { installFetchTimeout } from "./lib/fetch-timeout.js";
 import { applyInstanceConfig } from "./lib/instance-config.js";
+import { isAllowedLanding, resolveLanding } from "../src/utils/landing.js";
 import { readKvValue, writeKvValue } from "./lib/kv.js";
 import { sendNotification, notifyTargets } from "./lib/notify.js";
 import { CN_PROBE_KEY, ispLabel, mergeEntries, refreshSnapshot } from "./china-probe.js";
@@ -169,6 +170,8 @@ export async function runHostCheck({ kv, env = {}, fetchImpl = fetch, token = ""
   const snapshotBefore = await read(CN_VERIFIED_KEY);
   const targets = comboTop > 0 && explicitHosts ? pickComboTargets(snapshotBefore, comboTop) : [];
   const comboEntries = [];
+  // 和 china-probe 同一套落地白名单：组合测通了但落在白名单外的机房，同样记为不可用
+  const landing = resolveLanding(env);
   const groups = {};
   for (const [isp, host] of Object.entries(comboHost)) (groups[host] ||= []).push(isp);
   for (const target of targets) {
@@ -179,7 +182,7 @@ export async function runHostCheck({ kv, env = {}, fetchImpl = fetch, token = ""
       for (const check of checks) {
         if (!isps.includes(check.isp) || check.ignore) continue;
         // 组合测 RTT 用 TCP 建连耗时，和 TCP ping 口径一致；1034 / 重置都记为失败
-        comboEntries.push({ at, address: target.address, port: target.port, colo: check.colo, region: `CN-${check.isp}`, rtt: check.ok ? (check.tcp ?? null) : null, speed: null, clientHash: "globalping-https", ok: check.ok && check.tcp != null, reason: check.error || undefined });
+        comboEntries.push({ at, address: target.address, port: target.port, colo: check.colo, region: `CN-${check.isp}`, rtt: check.ok ? (check.tcp ?? null) : null, speed: null, clientHash: "globalping-https", ok: check.ok && check.tcp != null && isAllowedLanding(check.colo, landing), reason: check.error || (check.ok && !isAllowedLanding(check.colo, landing) ? "off-landing" : undefined) });
       }
     }
   }
@@ -191,7 +194,7 @@ export async function runHostCheck({ kv, env = {}, fetchImpl = fetch, token = ""
     const merged = mergeEntries(previous, comboEntries, now.getTime());
     await writeKvValue({ ...kv, key: CN_PROBE_KEY, value: JSON.stringify(merged), fetchImpl });
     const pool = [...((await read("BEST_IPS")) || []), ...((await read("CN_PENDING_IPS")) || [])];
-    snapshot = await refreshSnapshot({ kv, fetchImpl, entries: merged, pool, now: now.getTime() });
+    snapshot = await refreshSnapshot({ kv, fetchImpl, entries: merged, pool, now: now.getTime(), landing });
   }
 
   // 告警（可选）

@@ -72,5 +72,17 @@
     "type": "text",
     "cidrSamples": 4,
     "cfOnly": true
+  },
+  {
+    "name": "wetest-v4",
+    "url": "https://www.wetest.vip/page/cloudflare/address_v4.html",
+    "type": "scrape",
+    "cfOnly": true
+  },
+  {
+    "name": "vps789-cfip",
+    "url": "https://vps789.com/openApi/cfIpApi",
+    "type": "scrape",
+    "cfOnly": true
   }
 ]

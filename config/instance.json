@@ -3,6 +3,7 @@
   "LeilaoMi/preferred-sub-generator": {
     "CHECK_HOSTS": "1.leilaomi.ccwu.cc,2.leilaomi.ccwu.cc,3.leilaomi.ccwu.cc,4.leilaomi.ccwu.cc,5.leilaomi.ccwu.cc,6.leilaomi.ccwu.cc,7.leilaomi.ccwu.cc,8.leilaomi.ccwu.cc,9.leilaomi.ccwu.cc,10.leilaomi.ccwu.cc",
     "SUB_DEFAULT_ISP": "CU",
-    "VLESS_HOST": "1.leilaomi.ccwu.cc"
+    "VLESS_HOST": "1.leilaomi.ccwu.cc",
+    "SUB_LANDING": "US"
   }
 }

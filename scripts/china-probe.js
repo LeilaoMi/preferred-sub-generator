@@ -3,7 +3,10 @@
 // 电信 / 联通 / 移动三网家宽与机房探针上，对过审池 IP 做 TCP 443 握手测量。
 // 结果写入 KV 键 CN_PROBE_FEEDBACK，订阅排序与手机 probe-ips.js 回传的数据合并使用。
 //
-// 局限：只测 TCP 握手（RTT + 丢包），测不到 SNI 阻断；国内本机 probe-ips.js 仍是最准的补充。
+// 默认（CN_PROBE_MODE=http）每个 IP 都发 HTTPS GET /cdn-cgi/trace（SNI = 你的节点域名），
+// 能拿到 Cloudflare trace 才算 ok，同时记下国内入口实际落到的机房（colo）。
+// 配 SUB_LANDING=US 时，落地不在白名单的一律判不可用（想要美国出口给 AI 用就开这个）。
+// CN_PROBE_MODE=ping 退回老的 TCP 握手测法（测不到 SNI 阻断和落地机房）。
 import { installFetchTimeout } from "./lib/fetch-timeout.js";
 import { applyInstanceConfig } from "./lib/instance-config.js";
 import { readKvValue, writeKvValue } from "./lib/kv.js";
@@ -11,6 +14,11 @@ import { buildVerifiedSnapshot, CN_COMMUNITY_KEY, CN_VERIFIED_KEY, mergeSnapshot
 import { adaptBudget, API_BASE, cnLocations, gpHeaders, ispFromNetwork, ispFromProbe, readRemainingCredits } from "./lib/globalping.js";
 import { NON_TLS_PORTS } from "../src/utils/ports.js";
 import { httpResultToCheck } from "./china-host-check.js";
+import { isAllowedLanding, resolveLanding } from "../src/utils/landing.js";
+
+export function probeMode(env = process.env) {
+  return String(env.CN_PROBE_MODE || "").trim().toLowerCase() === "ping" ? "ping" : "http";
+}
 
 // 反代 IP 验证用的 SNI/Host：优先你的节点域名，没配就用 speed.cloudflare.com（能回 trace 就说明转发到了 CF）
 // 运行时再读：instance.json 里的 VLESS_HOST 由 applyInstanceConfig 在启动后注入
@@ -35,8 +43,8 @@ export function ispLabel(networkOrProbe) {
 }
 
 // 一个探针结果 -> 一条反馈；丢包超过 1/3 或没回包都算失败
-export function resultToEntry(target, result, at) {
-  if (target.relay) return relayResultToEntry(target, result, at);
+export function resultToEntry(target, result, at, { landing = null } = {}) {
+  if (target.relay || target.https) return relayResultToEntry(target, result, at, { landing });
   const stats = result?.result?.stats;
   const status = result?.result?.status;
   const total = Number(stats?.total) || 0;
@@ -57,11 +65,13 @@ export function resultToEntry(target, result, at) {
 }
 
 // HTTPS 组合测结果 -> 实测记录。RTT 取 TCP 建连耗时，和 TCP ping 口径一致
-export function relayResultToEntry(target, result, at) {
+export function relayResultToEntry(target, result, at, { landing = null } = {}) {
   const check = httpResultToCheck(result);
   // Globalping 自己的探针超时，不是目标的问题，不记
   if (check.ignore) return null;
-  const ok = Boolean(check.ok) && Number.isFinite(check.tcp);
+  const reachable = Boolean(check.ok) && Number.isFinite(check.tcp);
+  const offLanding = reachable && !isAllowedLanding(check.colo, landing);
+  const ok = reachable && !offLanding;
   return {
     at,
     address: target.address,
@@ -72,6 +82,7 @@ export function relayResultToEntry(target, result, at) {
     speed: null,
     clientHash: `globalping-https:${result?.probe?.asn || "?"}:${result?.probe?.city || "?"}`,
     ok,
+    ...(offLanding ? { offLanding: true } : {}),
   };
 }
 
@@ -80,7 +91,7 @@ export function relayResultToEntry(target, result, at) {
 // 对它们改发 HTTPS GET /cdn-cgi/trace（request.host 同时用作 SNI），拿到 Cloudflare 的 trace 才算 ok。
 // 额度和 ping 一样，每个探针 1 次。
 export function measurementBody(target, locations, relayHost = relayCheckHost()) {
-  if (target.relay) {
+  if (target.relay || target.https) {
     return {
       type: "http",
       target: target.address,
@@ -120,7 +131,7 @@ async function waitMeasurement(id, { fetchImpl, timeoutMs = 30000 }) {
 }
 
 // 选目标：手动置顶 + 上次国内 ok 的（保持新鲜）优先，其余按游标轮转，保证整池定期都被测到
-export function pickTargets(pool, previousEntries, cursor, budget, { skipPorts = NON_TLS_PORTS } = {}) {
+export function pickTargets(pool, previousEntries, cursor, budget, { skipPorts = NON_TLS_PORTS, mode = "ping" } = {}) {
   const okBefore = new Set(previousEntries.filter((e) => e.ok).map((e) => e.address));
   const seen = new Set();
   const out = [];
@@ -128,7 +139,7 @@ export function pickTargets(pool, previousEntries, cursor, budget, { skipPorts =
     if (out.length >= budget || seen.has(node.address)) return;
     seen.add(node.address);
     // 反代 IP（待验证池）要多验一层：TCP 通不等于能到 CF，见 createMeasurement
-    out.push({ address: node.address, port: Number(node.port) || 443, ...(node.pendingCn ? { relay: true } : {}) });
+    out.push({ address: node.address, port: Number(node.port) || 443, ...(node.pendingCn ? { relay: true } : {}), ...(mode === "http" && !node.pendingCn ? { https: true } : {}) });
   };
   // 只测 IP；非 TLS 端口（80/8080…）进不了 TLS 订阅，测了白耗额度
   const badPorts = new Set(skipPorts);
@@ -175,11 +186,21 @@ export async function fetchCommunityPool(url, { fetchImpl = fetch, timeoutMs = 1
 }
 
 // 用全部国内实测重算快照，够用才覆盖（scripts/china-host-check.js 也调用）
-export async function refreshSnapshot({ kv, fetchImpl, entries, pool, now = Date.now() }) {
+// 落地白名单变了（比如刚开 SUB_LANDING=US），旧快照是按旧规则选的，不能再拿来兜底
+export function landingKey(landing) {
+  return landing ? [...landing].sort((a, b) => a.localeCompare(b)).join(",") : "";
+}
+
+export async function refreshSnapshot({ kv, fetchImpl, entries, pool, now = Date.now(), landing = null }) {
   const raw = await readKvValue({ ...kv, key: CN_VERIFIED_KEY, fetchImpl });
   let previous = null;
   try { previous = raw ? JSON.parse(raw) : null; } catch { previous = null; }
-  const snapshot = mergeSnapshot(previous, buildVerifiedSnapshot(entries, pool, { now }));
+  const key = landingKey(landing);
+  if (previous && (previous.landing || "") !== key) {
+    console.log("落地白名单变了，丢弃旧快照");
+    previous = null;
+  }
+  const snapshot = { ...mergeSnapshot(previous, buildVerifiedSnapshot(entries, pool, { now })), landing: key };
   await writeKvValue({ ...kv, key: CN_VERIFIED_KEY, value: JSON.stringify(snapshot), fetchImpl });
   return snapshot;
 }
@@ -248,7 +269,19 @@ export function dedupePhoneEntries(previous, phone) {
   return phone.filter((e) => !seen.has(key(e)));
 }
 
-export async function runChinaProbe({ kv, fetchImpl = fetch, token = "", budget = 60, concurrency = 4, now = new Date(), communityUrl = "", publicVerified = false, defaultIsp = "", phoneUrl = "" }) {
+// 开了落地白名单后，老的 TCP ping 记录（没有机房信息、证明不了落地）不再参与排序，一次性清掉；
+// 手机实测带了 colo 的按白名单过滤，没带的同样证明不了落地
+export function dropUnprovenLanding(entries, landing) {
+  if (!landing) return entries;
+  return entries.filter((e) => {
+    const tag = String(e?.clientHash || "");
+    if (tag.startsWith("globalping:")) return false;
+    if (tag.startsWith("phone:") && e.ok) return isAllowedLanding(e.colo, landing);
+    return true;
+  });
+}
+
+export async function runChinaProbe({ kv, fetchImpl = fetch, token = "", budget = 60, concurrency = 4, now = new Date(), communityUrl = "", publicVerified = false, defaultIsp = "", phoneUrl = "", mode = "http", landing = null }) {
   const read = async (key) => {
     const raw = await readKvValue({ ...kv, key, fetchImpl });
     try { return raw ? JSON.parse(raw) : null; } catch { return null; }
@@ -270,8 +303,8 @@ export async function runChinaProbe({ kv, fetchImpl = fetch, token = "", budget 
   const remaining = await readRemainingCredits({ fetchImpl, token });
   const effectiveBudget = adaptBudget(budget, remaining, { perTarget: ISP_LOCATIONS.length });
   if (remaining !== null) console.log(`Globalping 剩余额度 ${remaining}，本轮预算 ${effectiveBudget}/${budget}`);
-  const { targets, nextCursor } = pickTargets(pool, previous, Number(state.cursor) || 0, effectiveBudget);
-  console.log(`池 ${pool.length} 个，本轮国内三网实测 ${targets.length} 个`);
+  const { targets, nextCursor } = pickTargets(pool, previous, Number(state.cursor) || 0, effectiveBudget, { mode });
+  console.log(`池 ${pool.length} 个，本轮国内三网实测 ${targets.length} 个（${mode === "http" ? "HTTPS trace" : "TCP ping"}${landing ? `，落地限 ${[...landing].length} 个机房` : ""}）`);
 
   const fresh = [];
   let rateLimited = false;
@@ -294,7 +327,7 @@ export async function runChinaProbe({ kv, fetchImpl = fetch, token = "", budget 
       const result = await waitMeasurement(created.id, { fetchImpl });
       if (!result) continue;
       for (const probeResult of result.results || []) {
-        const entry = resultToEntry(target, probeResult, at);
+        const entry = resultToEntry(target, probeResult, at, { landing });
         if (entry) fresh.push(entry);
       }
     }
@@ -303,21 +336,22 @@ export async function runChinaProbe({ kv, fetchImpl = fetch, token = "", budget 
   if (rateLimited) console.log("Globalping 额度用完，本轮提前结束（已测结果照常写入）");
 
   const okCount = fresh.filter((e) => e.ok).length;
-  console.log(`得到 ${fresh.length} 条三网结果，可用 ${okCount}`);
+  const offCount = fresh.filter((e) => e.offLanding).length;
+  console.log(`得到 ${fresh.length} 条三网结果，可用 ${okCount}${landing ? `，落地不符 ${offCount}` : ""}`);
   // 清掉老版本脚本回传的手机记录（没有出口哈希，无法确认是不是开着 VPN 测的）
-  const kept = previous.filter((e) => !/^phone:[^:]*:$/.test(String(e?.clientHash || "")));
-  if (kept.length !== previous.length) console.log(`清除 ${previous.length - kept.length} 条老版本手机记录`);
-  const phone = dedupePhoneEntries(kept, await fetchPhoneEntries(phoneUrl, { fetchImpl, now: now.getTime() }));
+  const kept = dropUnprovenLanding(previous.filter((e) => !/^phone:[^:]*:$/.test(String(e?.clientHash || ""))), landing);
+  if (kept.length !== previous.length) console.log(`清除 ${previous.length - kept.length} 条老记录（老版本手机 / 证明不了落地）`);
+  const phone = dedupePhoneEntries(kept, dropUnprovenLanding(await fetchPhoneEntries(phoneUrl, { fetchImpl, now: now.getTime() }), landing));
   if (phoneUrl) console.log(`手机实测新增 ${phone.length} 条`);
   let verified = null;
   if (fresh.length > 0 || phone.length > 0 || kept.length !== previous.length) {
     const merged = mergeEntries(kept, [...fresh, ...phone], now.getTime());
     await writeKvValue({ ...kv, key: CN_PROBE_KEY, value: JSON.stringify(merged), fetchImpl });
-    const snapshot = await refreshSnapshot({ kv, fetchImpl, entries: merged, pool, now: now.getTime() });
+    const snapshot = await refreshSnapshot({ kv, fetchImpl, entries: merged, pool, now: now.getTime(), landing });
     verified = { all: snapshot.all.length, CT: snapshot.CT.length, CU: snapshot.CU.length, CM: snapshot.CM.length };
     console.log(`国内已验证快照：综合 ${verified.all} / 电信 ${verified.CT} / 联通 ${verified.CU} / 移动 ${verified.CM}`);
   }
-  await writeKvValue({ ...kv, key: STATE_KEY, value: JSON.stringify({ publicVerified, defaultIsp: ["CT", "CU", "CM"].includes(String(defaultIsp).toUpperCase()) ? String(defaultIsp).toUpperCase() : null, cursor: nextCursor, lastRunAt: at, tested: targets.length, results: fresh.length, ok: okCount, rateLimited, verified: verified ?? state.verified ?? null, community: community ? community.all.length : null }), fetchImpl });
+  await writeKvValue({ ...kv, key: STATE_KEY, value: JSON.stringify({ publicVerified, defaultIsp: ["CT", "CU", "CM"].includes(String(defaultIsp).toUpperCase()) ? String(defaultIsp).toUpperCase() : null, cursor: nextCursor, lastRunAt: at, tested: targets.length, results: fresh.length, ok: okCount, rateLimited, mode, landing: landing ? [...landing] : null, offLanding: offCount, verified: verified ?? state.verified ?? null, community: community ? community.all.length : null }), fetchImpl });
   return { tested: targets.length, results: fresh.length, ok: okCount, rateLimited, verified };
 }
 
@@ -341,7 +375,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const defaultIsp = process.env.SUB_DEFAULT_ISP || "";
   // 手机实测结果（cf-termux-pick 的 best-ips.json 的 raw 地址），不填就不收
   const phoneUrl = process.env.PHONE_RESULTS_URL || "";
-  runChinaProbe({ kv, token, budget, communityUrl, publicVerified, defaultIsp, phoneUrl }).catch((error) => {
+  // CN_PROBE_MODE=ping 退回 TCP 握手；SUB_LANDING=US 只要落美国机房的节点
+  const mode = probeMode();
+  const landing = resolveLanding(process.env);
+  runChinaProbe({ kv, token, budget, communityUrl, publicVerified, defaultIsp, phoneUrl, mode, landing }).catch((error) => {
     console.error(`失败: ${error.message}`);
     process.exitCode = 1;
   });
