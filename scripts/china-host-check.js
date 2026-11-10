@@ -10,7 +10,7 @@
 // 没配任何域名时，测订阅自己的域名（<Pages 项目>.pages.dev），零配置也有用。
 import { installFetchTimeout } from "./lib/fetch-timeout.js";
 import { applyInstanceConfig } from "./lib/instance-config.js";
-import { isAllowedLanding, parseLandingColos } from "../src/utils/landing.js";
+import { isAllowedLanding, resolveLanding } from "../src/utils/landing.js";
 import { readKvValue, writeKvValue } from "./lib/kv.js";
 import { sendNotification, notifyTargets } from "./lib/notify.js";
 import { CN_PROBE_KEY, ispLabel, mergeEntries, refreshSnapshot } from "./china-probe.js";
@@ -171,7 +171,7 @@ export async function runHostCheck({ kv, env = {}, fetchImpl = fetch, token = ""
   const targets = comboTop > 0 && explicitHosts ? pickComboTargets(snapshotBefore, comboTop) : [];
   const comboEntries = [];
   // 和 china-probe 同一套落地白名单：组合测通了但落在白名单外的机房，同样记为不可用
-  const landing = parseLandingColos(env.SUB_LANDING);
+  const landing = resolveLanding(env);
   const groups = {};
   for (const [isp, host] of Object.entries(comboHost)) (groups[host] ||= []).push(isp);
   for (const target of targets) {

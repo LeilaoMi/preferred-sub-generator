@@ -14,7 +14,7 @@ import { buildVerifiedSnapshot, CN_COMMUNITY_KEY, CN_VERIFIED_KEY, mergeSnapshot
 import { adaptBudget, API_BASE, cnLocations, gpHeaders, ispFromNetwork, ispFromProbe, readRemainingCredits } from "./lib/globalping.js";
 import { NON_TLS_PORTS } from "../src/utils/ports.js";
 import { httpResultToCheck } from "./china-host-check.js";
-import { isAllowedLanding, parseLandingColos } from "../src/utils/landing.js";
+import { isAllowedLanding, resolveLanding } from "../src/utils/landing.js";
 
 export function probeMode(env = process.env) {
   return String(env.CN_PROBE_MODE || "").trim().toLowerCase() === "ping" ? "ping" : "http";
@@ -377,7 +377,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const phoneUrl = process.env.PHONE_RESULTS_URL || "";
   // CN_PROBE_MODE=ping 退回 TCP 握手；SUB_LANDING=US 只要落美国机房的节点
   const mode = probeMode();
-  const landing = mode === "http" ? parseLandingColos(process.env.SUB_LANDING) : null;
+  const landing = resolveLanding(process.env);
   runChinaProbe({ kv, token, budget, communityUrl, publicVerified, defaultIsp, phoneUrl, mode, landing }).catch((error) => {
     console.error(`失败: ${error.message}`);
     process.exitCode = 1;

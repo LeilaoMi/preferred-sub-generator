@@ -93,7 +93,7 @@ Clash 的地区分组也按同一规则归类。
 |---|---|---|
 | `GLOBALPING_TOKEN` | Secret | 提高 Globalping 额度 |
 | `CN_PROBE_BUDGET` | Variable | 每轮国内实测的 IP 数，有 token 默认 150，没有默认 60 |
-| `CN_PROBE_MODE` | Variable | 默认 `http`：每个 IP 用 HTTPS 请求 `/cdn-cgi/trace`，拿到 trace 才算通并记录落地机房；`ping` 退回 TCP 握手（测不到 SNI 阻断和机房） |
+| `CN_PROBE_MODE` | Variable | 默认 `http`：每个 IP 用 HTTPS 请求 `/cdn-cgi/trace`，拿到 trace 才算通并记录落地机房；`ping` 退回 TCP 握手（测不到 SNI 阻断和机房，此时 `SUB_LANDING` 不生效） |
 | `CN_COMBO_TOP` | Variable | 每轮组合测的 IP 数，默认 10 |
 | `SUB_ROTATE_HOSTS` | Variable | `1`：直接订阅时，节点域名轮换为该运营商未被墙的 `CHECK_HOSTS`（这些域名须绑在同一个 edgetunnel 上；对 `sub://` 无效） |
 | `ALLOW_RELAY` | Variable | 默认放行社区反代 IP；`0` 只用 Cloudflare 官方 IPv4 |

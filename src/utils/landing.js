@@ -28,3 +28,14 @@ export function isAllowedLanding(colo, allowed) {
   const code = String(colo || "").toUpperCase();
   return Boolean(code) && allowed.has(code);
 }
+
+/**
+ * 两个探测入口共用的落地白名单：CN_PROBE_MODE=ping 测不到机房，此时忽略 SUB_LANDING，
+ * 避免一边过滤一边不过滤、用不同的 landing 键互相清空快照。
+ * @param {Record<string, string|undefined>} env
+ * @returns {Set<string>|null}
+ */
+export function resolveLanding(env = process.env) {
+  if (String(env.CN_PROBE_MODE || "").trim().toLowerCase() === "ping") return null;
+  return parseLandingColos(env.SUB_LANDING);
+}

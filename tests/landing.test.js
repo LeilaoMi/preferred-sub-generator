@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isAllowedLanding, parseLandingColos } from "../src/utils/landing.js";
+import { isAllowedLanding, parseLandingColos, resolveLanding } from "../src/utils/landing.js";
 import { dropUnprovenLanding, measurementBody, pickTargets, probeMode, resultToEntry } from "../scripts/china-probe.js";
 import { parseScrape } from "../scripts/lib/candidates.js";
 
@@ -76,4 +76,12 @@ test("落地白名单变化时丢弃旧快照", async () => {
   assert.equal(snap.landing, landingKey(landing));
   assert.ok(!snap.CU.some((item) => item.address.startsWith("104.16.0.")));
   assert.ok(written);
+});
+
+test("resolveLanding: ping 模式下两个入口都忽略 SUB_LANDING", () => {
+  assert.equal(resolveLanding({ CN_PROBE_MODE: "ping", SUB_LANDING: "US" }), null);
+  assert.equal(resolveLanding({ CN_PROBE_MODE: " PING ", SUB_LANDING: "LAX" }), null);
+  assert.ok(resolveLanding({ SUB_LANDING: "LAX" }).has("LAX"));
+  assert.ok(resolveLanding({ CN_PROBE_MODE: "http", SUB_LANDING: "LAX" }).has("LAX"));
+  assert.equal(resolveLanding({}), parseLandingColos(undefined));
 });
