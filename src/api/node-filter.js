@@ -80,7 +80,7 @@ function resolveRttDropMs(options = {}) {
 
 // 一条实测记录算"可用"的唯一标准：没判死、RTT 有限、没超过淘汰门槛
 export function isMeasuredOk(score, rttDropMs) {
-  if (!score || score.unreachable) return false;
+  if (!score || score.unreachable || score.unproven) return false;
   const rtt = Number(score?.rtt);
   return Number.isFinite(rtt) && rtt > 0 && rtt <= rttDropMs;
 }
@@ -197,7 +197,7 @@ export function readMinNodes(env = {}) {
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : DEFAULT_MIN_NODES;
 }
 
-export function selectVerifiedNodes(nodes, scores, { limit, minNodes, env = {}, rttDropMs } = {}) {
+export function selectVerifiedNodes(nodes, scores, { limit, minNodes, env = {}, rttDropMs, fill = true } = {}) {
   const list = Array.isArray(nodes) ? nodes : [];
   const dropMs = rttDropMs ?? readRttDropMs(env);
   const floor = minNodes ?? readMinNodes(env);
@@ -217,9 +217,11 @@ export function selectVerifiedNodes(nodes, scores, { limit, minNodes, env = {}, 
   measured.sort(byRank);
 
   const verified = [...measured.map(({ node, score }) => decorateMeasured(node, score)), ...pinned];
-  const filler = verified.length < floor ? rest.slice(0, floor - verified.length) : [];
+  // fill=false（开了落地白名单）：没实测过的节点证明不了落地，不拿来补位
+  const filler = fill && verified.length < floor ? rest.slice(0, floor - verified.length) : [];
   let result = [...verified, ...filler];
-  // 全部被判死时保留原列表，订阅不断流
+  // 全部被判死时保留原列表，订阅不断流（开了白名单也一样：稳定优先，空订阅比落地不符更糟；
+  // 实际很少走到这里，前面有落地合格的国内快照兜底）
   if (result.length === 0) result = list.slice();
   return result.slice(0, cap);
 }

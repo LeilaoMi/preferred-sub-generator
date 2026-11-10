@@ -39,3 +39,42 @@ export function resolveLanding(env = process.env) {
   if (String(env.CN_PROBE_MODE || "").trim().toLowerCase() === "ping") return null;
   return parseLandingColos(env.SUB_LANDING);
 }
+
+/**
+ * Worker 端（订阅生成）的落地白名单：Pages 环境变量 SUB_LANDING 优先，
+ * 否则用 china-probe 写进 CN_PROBE_STATE.landing 的那份（instance.json 只作用于 Actions，Worker 读不到）。
+ * @param {Record<string, unknown>} env
+ * @param {{landing?: unknown}|null} state
+ * @returns {Set<string>|null}
+ */
+export function workerLanding(env = {}, state = null) {
+  const fromEnv = parseLandingColos(env?.SUB_LANDING);
+  if (fromEnv) return fromEnv;
+  if (!Array.isArray(state?.landing) || state.landing.length === 0) return null;
+  const parsed = parseLandingColos(state.landing.filter((c) => typeof c === "string").join(","));
+  // 探针写了白名单但一个都解析不出来：说明数据坏了，记一笔再按不限处理
+  if (!parsed) console.log("CN_PROBE_STATE.landing 无法解析，落地白名单未生效");
+  return parsed;
+}
+
+/**
+ * 按落地白名单修正实测评分：落在白名单外的判死；成功但没有机房信息的（浏览器测速、老记录）
+ * 标 unproven，不再算「国内实测 ok」，只能排在后面。
+ * @param {Map<string, object>|null} scores
+ * @param {Set<string>|null} landing
+ * @returns {Map<string, object>|null}
+ */
+export function applyLandingToScores(scores, landing) {
+  if (!landing || !scores) return scores;
+  const out = new Map();
+  for (const [address, score] of scores) {
+    if (!score || score.unreachable) {
+      out.set(address, score);
+    } else if (score.colo) {
+      out.set(address, isAllowedLanding(score.colo, landing) ? score : { ...score, unreachable: true, offLanding: true });
+    } else {
+      out.set(address, { ...score, unproven: true });
+    }
+  }
+  return out;
+}
