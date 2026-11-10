@@ -19,12 +19,15 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       # cf-termux-pick 已公开，无需 token；拉取失败不阻塞，沿用现有 manual.txt
       - name: Pull best IPs from cf-termux-pick
         continue-on-error: true
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          persist-credentials: false
           repository: LeilaoMi/cf-termux-pick
           path: cf-termux-pick
           sparse-checkout: |
