@@ -22,6 +22,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          persist-credentials: false
           # 部署只发 main：workflow_dispatch 从任意分支触发时也不能把该分支内容推到 main 别名
           ref: main
 
