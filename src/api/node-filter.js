@@ -159,7 +159,7 @@ export function sampleNodes(nodes, { limit, scores, random = Math.random, rttDro
     const weight = sampleWeight(score, dropMs);
     const draw = Number(random());
     const safe = Number.isFinite(draw) ? Math.min(Math.max(draw, Number.EPSILON), 1 - Number.EPSILON) : 0.5;
-    return { node: decorateMeasured(node, score), key: Math.pow(safe, 1 / weight) };
+    return { node: decorateMeasured(node, score), key: safe ** (1 / weight) };
   });
 
   keyed.sort((a, b) => b.key - a.key);
