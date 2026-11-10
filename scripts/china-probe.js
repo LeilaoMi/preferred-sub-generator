@@ -188,7 +188,7 @@ export async function fetchCommunityPool(url, { fetchImpl = fetch, timeoutMs = 1
 // 用全部国内实测重算快照，够用才覆盖（scripts/china-host-check.js 也调用）
 // 落地白名单变了（比如刚开 SUB_LANDING=US），旧快照是按旧规则选的，不能再拿来兜底
 export function landingKey(landing) {
-  return landing ? [...landing].sort().join(",") : "";
+  return landing ? [...landing].sort((a, b) => a.localeCompare(b)).join(",") : "";
 }
 
 export async function refreshSnapshot({ kv, fetchImpl, entries, pool, now = Date.now(), landing = null }) {
