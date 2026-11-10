@@ -15,6 +15,7 @@ import { getNodeConfig, getNodeConfigFromUrl, nodeConfigToTemplate, validateNode
 import { readBestIps, readBestIpsV6, readPendingCnIps } from "./kv.js";
 import { filterNodesByColo, isMeasuredOk, parseColoFilter, readMinNodes, readRttDropMs, sampleNodes, selectVerifiedNodes, withPreferredPort } from "./node-filter.js";
 import { getPreferredPortOrder, NON_TLS_PORTS } from "../utils/ports.js";
+import { applyLandingToScores, workerLanding } from "../utils/landing.js";
 
 const MAX_NODES = 50;
 // 探测旁路给 edgetunnel 的节点上限
@@ -109,12 +110,11 @@ export function ispFromHost(hostname) {
   return HOST_ISP[label] || null;
 }
 
-async function readDefaultIsp(kv) {
+async function readProbeState(kv) {
   try {
-    const state = JSON.parse((await kv?.get?.("CN_PROBE_STATE")) || "{}");
-    return normalizeIsp(state.defaultIsp);
+    return JSON.parse((await kv?.get?.("CN_PROBE_STATE")) || "{}") || {};
   } catch {
-    return null;
+    return {};
   }
 }
 
@@ -253,11 +253,15 @@ async function buildSub(request, env, url, edgeProbe) {
   // edgetunnel 的 sub:// 只取域名（url.origin），带不了 ?isp=，所以默认运营商也可用 GitHub 变量 SUB_DEFAULT_ISP 设置
   // （china-probe 写进 CN_PROBE_STATE.defaultIsp），或 Pages 环境变量同名。
   const ispParam = String(url.searchParams.get("isp") || "").toLowerCase();
-  const isp = ispParam === "all" ? null : normalizeIsp(ispParam) || ispFromHost(url.hostname) || normalizeIsp(env.SUB_DEFAULT_ISP) || (rankOff ? null : await readDefaultIsp(env.SUB_KV));
+  const probeState = rankOff ? {} : await readProbeState(env.SUB_KV);
+  // 落地白名单（SUB_LANDING）：落在白名单外的判死，没机房信息的不算实测 ok，也不拿未实测节点补位
+  const landing = rankOff ? null : workerLanding(env, probeState);
+  const isp = ispParam === "all" ? null : normalizeIsp(ispParam) || ispFromHost(url.hostname) || normalizeIsp(env.SUB_DEFAULT_ISP) || (rankOff ? null : normalizeIsp(probeState.defaultIsp));
   if (!rankOff) {
     // 选节点只认最近 SUB_VERIFIED_DAYS 天（默认 3）的国内实测，太旧的实测不代表现在的线路
     try {
       ({ scores } = await loadIpScores(env, { days: env.SUB_VERIFIED_DAYS || 3, isp }));
+      scores = applyLandingToScores(scores, landing);
     } catch (error) {
       console.log(`loadIpScores failed: ${error?.message || error}`);
       scores = null;
@@ -281,6 +285,8 @@ async function buildSub(request, env, url, edgeProbe) {
       }
       if (countOk() < floor) {
         ({ nodes, scores } = applySnapshotFallback(nodes, scores, snapshotList(await readSnapshot(env.SUB_KV, CN_COMMUNITY_KEY).catch(() => null), isp), { penalty: 1000, source: "cn-community" }));
+        // 社区池是别人按别人的规则测的，同样过一遍白名单
+        scores = applyLandingToScores(scores, landing);
       }
     }
   }
@@ -299,7 +305,7 @@ async function buildSub(request, env, url, edgeProbe) {
     nodes = colosFiltered.slice(0, limit);
   } else {
     // 默认（含 edgetunnel 探测）：固定输出 国内实测 ok > 手动置顶 > 过审池补齐，每次结果一致
-    nodes = selectVerifiedNodes(colosFiltered, scores, { limit, env });
+    nodes = selectVerifiedNodes(colosFiltered, scores, { limit, env, fill: !landing });
   }
   // P2-6: ?ip6=1 追加未实测 IPv6（不占 limit 名额、不进排名抽样；探测旁路不混入）
   if (!edgeProbe && url.searchParams.get("ip6") === "1") {

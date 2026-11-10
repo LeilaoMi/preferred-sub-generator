@@ -130,16 +130,52 @@ async function waitMeasurement(id, { fetchImpl, timeoutMs = 30000 }) {
   return null;
 }
 
-// 选目标：手动置顶 + 上次国内 ok 的（保持新鲜）优先，其余按游标轮转，保证整池定期都被测到
+// /24 网段统计：近 3 天在该网段测过几个不同 IP、几个通过（开了落地白名单时，落地不符算不通）
+export function subnetKey(address) {
+  const m = /^(\d+\.\d+\.\d+)\.\d+$/.exec(String(address || ""));
+  return m ? m[1] : null;
+}
+
+export function subnetStats(entries) {
+  const tested = new Map();
+  const ok = new Map();
+  for (const e of Array.isArray(entries) ? entries : []) {
+    if (!String(e?.clientHash || "").startsWith("globalping")) continue;
+    const key = subnetKey(e?.address);
+    if (!key) continue;
+    (tested.get(key) || tested.set(key, new Set()).get(key)).add(e.address);
+    if (e.ok) (ok.get(key) || ok.set(key, new Set()).get(key)).add(e.address);
+  }
+  const out = new Map();
+  for (const [key, set] of tested) out.set(key, { tested: set.size, ok: ok.get(key)?.size || 0 });
+  return out;
+}
+
+// 死网段：测过至少 DEAD_MIN_TESTED 个不同 IP、一个都没通过
+const DEAD_MIN_TESTED = 3;
+// 每轮仍留一点额度给死网段（线路会变），也给好网段里没测过的 IP 一个固定份额
+const DEAD_EXPLORE_SHARE = 0.1;
+const GOOD_SUBNET_SHARE = 1 / 3;
+
+// 选目标：手动置顶 + 上次国内 ok 的（保持新鲜）优先；再给「有 IP 通过的 /24」里没测过的 IP 一份额度；
+// 其余按游标轮转，死网段只留少量探索额度，省下的额度给别的网段，保证整池定期都被测到
 export function pickTargets(pool, previousEntries, cursor, budget, { skipPorts = NON_TLS_PORTS, mode = "ping" } = {}) {
   const okBefore = new Set(previousEntries.filter((e) => e.ok).map((e) => e.address));
+  const testedBefore = new Set(previousEntries.map((e) => e.address));
+  const stats = subnetStats(previousEntries);
+  const isDead = (address) => {
+    const st = stats.get(subnetKey(address));
+    return Boolean(st) && st.tested >= DEAD_MIN_TESTED && st.ok === 0;
+  };
+  const isGood = (address) => (stats.get(subnetKey(address))?.ok || 0) > 0;
   const seen = new Set();
   const out = [];
   const push = (node) => {
-    if (out.length >= budget || seen.has(node.address)) return;
+    if (out.length >= budget || seen.has(node.address)) return false;
     seen.add(node.address);
     // 反代 IP（待验证池）要多验一层：TCP 通不等于能到 CF，见 createMeasurement
     out.push({ address: node.address, port: Number(node.port) || 443, ...(node.pendingCn ? { relay: true } : {}), ...(mode === "http" && !node.pendingCn ? { https: true } : {}) });
+    return true;
   };
   // 只测 IP；非 TLS 端口（80/8080…）进不了 TLS 订阅，测了白耗额度
   const badPorts = new Set(skipPorts);
@@ -147,12 +183,23 @@ export function pickTargets(pool, previousEntries, cursor, budget, { skipPorts =
   ipOnly.filter((n) => n.source === "edge-manual").forEach(push);
   const keepFresh = Math.floor(budget / 3);
   ipOnly.filter((n) => okBefore.has(n.address)).slice(0, keepFresh).forEach(push);
+  const goodCap = out.length + Math.floor(budget * GOOD_SUBNET_SHARE);
+  for (const node of ipOnly) {
+    if (out.length >= goodCap) break;
+    if (isGood(node.address) && !testedBefore.has(node.address)) push(node);
+  }
   const start = ipOnly.length ? cursor % ipOnly.length : 0;
   const rotated = [...ipOnly.slice(start), ...ipOnly.slice(0, start)];
+  let deadLeft = Math.max(1, Math.floor(budget * DEAD_EXPLORE_SHARE));
   let advanced = 0;
   for (const node of rotated) {
     if (out.length >= budget) break;
     advanced += 1;
+    if (isDead(node.address) && !seen.has(node.address)) {
+      if (deadLeft <= 0) continue;
+      if (push(node)) deadLeft -= 1;
+      continue;
+    }
     push(node);
   }
   return { targets: out, nextCursor: ipOnly.length ? (start + advanced) % ipOnly.length : 0 };
