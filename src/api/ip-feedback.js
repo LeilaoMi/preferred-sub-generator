@@ -208,7 +208,7 @@ export function entryWeight(item, { now, halfLifeHours = DEFAULT_HALF_LIFE_HOURS
   const ts = Date.parse(item?.at || "");
   if (Number.isFinite(now) && Number.isFinite(ts) && halfLifeHours > 0) {
     const ageHours = Math.max(0, now - ts) / 3600000;
-    weight *= Math.pow(0.5, ageHours / halfLifeHours);
+    weight *= 0.5 ** (ageHours / halfLifeHours);
   }
   if (isPeakHour(item?.at)) weight *= peakWeight;
   return weight;
