@@ -81,7 +81,8 @@ Clash 的地区分组也按同一规则归类。
 |---|---|---|
 | `SUB_DEFAULT_ISP` | 订阅默认按哪个运营商的实测排序 | `CU`（联通）、`CT`（电信）、`CM`（移动） |
 | `CHECK_HOSTS` | 你 edgetunnel 实际用的域名，逗号分隔。开启域名体检和 IP × 域名组合测 | `1.a.com,2.a.com` |
-| `VLESS_HOST` | 美国初筛时用的域名，填你的主节点域名 | `1.a.com` |
+| `VLESS_HOST` | 美国初筛和国内 HTTPS 实测用的域名（SNI），填你的主节点域名 | `1.a.com` |
+| `SUB_LANDING` | 只要国内入口落到这些 Cloudflare 机房的节点。edgetunnel 访问非 CF 站点时出口就是入口机房，想要美国出口（AI 站点）填 `US` | `US`、`ASIA`、`LAX,SJC,SEA` |
 
 改不了设置页时，也可以直接编辑 [`config/instance.json`](config/instance.json)：只有键名等于仓库全名（如 `你的用户名/preferred-sub-generator`）时才生效，并会覆盖同名变量；别人 Fork 你的仓库时不会继承。
 
@@ -92,6 +93,7 @@ Clash 的地区分组也按同一规则归类。
 |---|---|---|
 | `GLOBALPING_TOKEN` | Secret | 提高 Globalping 额度 |
 | `CN_PROBE_BUDGET` | Variable | 每轮国内实测的 IP 数，有 token 默认 150，没有默认 60 |
+| `CN_PROBE_MODE` | Variable | 默认 `http`：每个 IP 用 HTTPS 请求 `/cdn-cgi/trace`，拿到 trace 才算通并记录落地机房；`ping` 退回 TCP 握手（测不到 SNI 阻断和机房） |
 | `CN_COMBO_TOP` | Variable | 每轮组合测的 IP 数，默认 10 |
 | `SUB_ROTATE_HOSTS` | Variable | `1`：直接订阅时，节点域名轮换为该运营商未被墙的 `CHECK_HOSTS`（这些域名须绑在同一个 edgetunnel 上；对 `sub://` 无效） |
 | `ALLOW_RELAY` | Variable | 默认放行社区反代 IP；`0` 只用 Cloudflare 官方 IPv4 |

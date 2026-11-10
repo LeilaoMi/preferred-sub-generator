@@ -30,7 +30,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_NAMESPACE_ID: ${{ secrets.CLOUDFLARE_NAMESPACE_ID }}
 
-      - name: 国内三网 TCP 实测
+      - name: 国内三网 HTTPS 实测
         run: node scripts/china-probe.js
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN_2 }}
@@ -40,5 +40,11 @@ jobs:
           COMMUNITY_POOL_URL: ${{ vars.COMMUNITY_POOL_URL }}
           PUBLIC_CN_VERIFIED: ${{ vars.PUBLIC_CN_VERIFIED }}
           SUB_DEFAULT_ISP: ${{ vars.SUB_DEFAULT_ISP }}
+          # http（默认）= HTTPS trace 测落地机房；ping = 老的 TCP 握手
+          CN_PROBE_MODE: ${{ vars.CN_PROBE_MODE }}
+          # 落地机房白名单：US / ASIA / EU 或三字码，空 = 不限
+          SUB_LANDING: ${{ vars.SUB_LANDING }}
+          VLESS_HOST: ${{ vars.VLESS_HOST }}
+          VLESS_SNI: ${{ vars.VLESS_SNI }}
           # 手机 cf-termux-pick 的结构化结果；仓库不存在时 404，自动跳过
           PHONE_RESULTS_URL: ${{ vars.PHONE_RESULTS_URL || format('https://raw.githubusercontent.com/{0}/cf-termux-pick/main/best-ips.json', github.repository_owner) }}

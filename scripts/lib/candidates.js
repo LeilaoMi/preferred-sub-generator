@@ -200,6 +200,19 @@ function parseText(text, source, maxCidrSamples = DEFAULT_CIDR_SAMPLES) {
   return candidates;
 }
 
+// 网页 / 任意 JSON：直接把正文里出现的 IPv4 全抠出来（wetest 表格、vps789 三网 JSON 之类）
+const IPV4_RE = /\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}\b/g;
+export function parseScrape(text, source) {
+  const seen = new Set();
+  const out = [];
+  for (const address of String(text || "").match(IPV4_RE) || []) {
+    if (seen.has(address)) continue;
+    seen.add(address);
+    out.push({ address, port: null, source });
+  }
+  return out;
+}
+
 function findHeaderIndex(header, names) {
   const normalized = header.map((cell) => String(cell || "").trim().toLowerCase());
   for (const name of names) {
@@ -350,7 +363,9 @@ async function fetchRemoteSource(source, { fetchImpl, maxSourceBytes }) {
     const sourceType = getSourceType(source, url);
     let parsed;
 
-    if (sourceType === "csv") {
+    if (sourceType === "scrape") {
+      parsed = parseScrape(body, sourceName);
+    } else if (sourceType === "csv") {
       const remarkColumn = typeof source === "object" && typeof source.remarkColumn === "number" ? source.remarkColumn : undefined;
       parsed = parseCsv(body, sourceName, minSpeed, { remarkColumn });
     } else {
