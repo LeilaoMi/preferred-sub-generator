@@ -29,7 +29,7 @@
 
 - [ ] `/status` 返回 JSON，`updatedAt` 是最近时间，`cnProbe.lastRunAt` 有值。
 - [ ] `/health` 返回 `{"ok":true}`。
-- [ ] 模拟 edgetunnel 请求 `/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000`（UA 含 `edgetunnel`）返回 base64 文本。
+- [ ] 模拟 edgetunnel 请求 `/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000`（UA 含 `edgetunnel`）返回 base64 文本，解码后至少有 1 个节点。
 - [ ] edgetunnel 面板填 `sub://你的部署域名`，关闭「随机 IP」，「验证优选 API」能看到 IP。
 - [ ] 绑了 `ct.` / `cu.` / `cm.` 子域名时，各自能返回结果。
 - [ ] 设了 `SUB_TOKEN` 时：`/health/full` 带 `Authorization: Bearer 你的SUB_TOKEN` 能返回详情，不带时返回 401。

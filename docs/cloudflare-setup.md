@@ -42,14 +42,16 @@
 注意：
 
 - 改完变量需要重新部署才生效（push 到 `main`，或在 Actions 手动运行 **Deploy to Cloudflare Pages**）。
-- 部署使用仓库里的 `wrangler.toml`，绑定（KV、D1）以文件为准。token 类变量建议以「机密 / Secret」类型添加。
+- 部署使用仓库里的 `wrangler.toml`，它是 Pages 项目配置的唯一来源，绑定（KV、D1）以文件为准。文件里没有 `[vars]`，控制台中的明文变量可能在部署时被清除，加密变量不受影响，因此建议所有变量都以「机密 / Secret」类型添加。
 - 如果发现部署后管理 token 失效，可以改用 `/setup.html` 把管理 token 的哈希存进 KV，KV 不受重新部署影响。
 
 ## 4. D1（可选）
 
 D1 用于保存浏览器测速反馈（`speed_feedback` 表）和逐 IP 实测回传（`ip_feedback` 表），支持 `/admin.html` 的按天趋势。未绑定时自动回退 KV（各保留最近 500 条），并且匿名的浏览器测速不会落库。
 
-自动创建失败时，可以手动创建：
+自动创建失败时，先确认 Actions 使用的令牌带有「账户 → D1 → 编辑」权限；补上权限后重新运行 **Deploy to Cloudflare Pages**，`cf-bootstrap.js` 会找到或创建数据库，并在 `wrangler.toml` 中写入 `SPEED_DB` 绑定。
+
+也可以手动创建：
 
 ```bash
 npx wrangler d1 create speed-feedback

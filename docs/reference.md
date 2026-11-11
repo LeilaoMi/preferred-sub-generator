@@ -98,9 +98,9 @@
 | 管理 token | Pages `SUB_TOKEN`（轮换期 `SUB_TOKEN_NEXT`），或 `/setup.html` 写入 KV 的哈希 | 管理接口；同时也被只读接口接受 |
 
 - `SUB_PUBLIC` 未设置时为公开模式：没有有效 token 的请求也放行，但**不能使用服务端节点模板**（KV `TEMPLATE` 或 `VLESS_*`），只能用 URL 里自带的节点参数。
-- `SUB_PUBLIC=0`（或 `false` / `no` / `off`）时，只读接口必须带有效 token。
+- `SUB_PUBLIC=0`（或 `false` / `no` / `off`）时，只读接口必须带有效 token。例外：edgetunnel 探测请求（占位参数 + UA 含 `edgetunnel`）仍可匿名拿到候选 IP，返回内容只含占位模板，不含服务端节点模板。
 - 只读 token 可用 `?t=` 或 `Authorization: Bearer`；管理 token 默认只接受 `Authorization: Bearer`，`ALLOW_QUERY_TOKEN=1` 时额外接受 `?token=`。
-- `SUB_TOKEN_ROTATE_DAYS=N` 时，有效只读凭证变为 `HMAC-SHA256(SUB_READ_TOKEN, 周期)` 的当期与上一期值，静态 `SUB_READ_TOKEN` 只作为密钥。
+- `SUB_TOKEN_ROTATE_DAYS=N` 时，有效只读凭证为以 `SUB_READ_TOKEN` 为密钥、对消息 `read-token-v1:${period}` 计算的 HMAC-SHA256（十六进制小写），其中 `period = floor(Date.now() / (N × 86400000))`；当期与上一期均有效，静态 `SUB_READ_TOKEN` 只作为密钥，不再直接作为凭证。
 - `SUB_ALLOWED_IPS` 限制 token 鉴权的来源 IP。
 
 ## KV 键

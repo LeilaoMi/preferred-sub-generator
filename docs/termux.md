@@ -6,7 +6,7 @@ Globalping 的国内探针多在家宽或机房，不等于你的手机线路。
 
 | 方式 | 结果去向 | 适合 |
 |---|---|---|
-| [cf-termux-pick](https://github.com/LeilaoMi/cf-termux-pick)（推荐） | 推到 GitHub 仓库，China Probe 每轮通过 `PHONE_RESULTS_URL` 自动拉取 | 不想在手机上保存管理 token |
+| [cf-termux-pick](https://github.com/LeilaoMi/cf-termux-pick)（推荐） | 推到 GitHub 仓库，China Probe 每轮通过 `PHONE_RESULTS_URL` 自动拉取（默认 `https://raw.githubusercontent.com/<工作流所在仓库的主人>/cf-termux-pick/main/best-ips.json`；放在别处时设 Actions 变量 `PHONE_RESULTS_URL`） | 不想在手机上保存管理 token |
 | 本仓库 `scripts/termux-probe.sh`（本文） | 直接回传到你部署的 `/api/ip-feedback` | 已设置管理 token，想立即生效 |
 
 本文介绍第二种。回传数据在绑定 D1 时写入 D1，否则写入 KV（保留最近 500 条）。
@@ -55,4 +55,4 @@ sv-enable crond          # 装完需重开一次 Termux
 
 把你确认能用的 IP 或优选域名写进 `sources/edge/manual.txt`（每行一个，`IP`、`IP:端口` 或 `域名:端口`）。即使美国初筛连不上，它们也会留在候选池里，订阅时排在国内实测节点之后、补位节点之前。
 
-> 注意：Update 工作流运行时会用仓库主人自己的 `<你的用户名>/cf-termux-pick` 仓库的 `best-ips.txt` 替换 `manual.txt` 中的 IP 行（只在当次运行中，不提交）；拉取失败时才使用仓库里的内容。
+> 注意：Update 工作流运行时会用仓库主人自己的 `<你的用户名>/cf-termux-pick` 仓库的 `best-ips.txt` 替换 `manual.txt` 中**所有非注释行**（包括域名和 `host:端口` 条目），只在当次运行中生效，不提交；拉取失败或 `best-ips.txt` 没有可用行时才使用仓库里的内容。想让仓库里的 `manual.txt` 生效，需要在 `update.yml` 中停用「Sync best-ips to manual source」这一步。

@@ -192,11 +192,13 @@ Clash / Stash 输出里的地区分组按同一规则归类。
 
 ### Cloudflare Pages 环境变量
 
-这些变量只在 Pages 项目里配置才生效，填在 GitHub Actions 里无效。改完需要重新部署（push 一次或手动运行 Deploy）。
+这些变量只在 Pages 项目里配置才生效，填在 GitHub Actions 里无效。改完需要重新部署（push 一次或手动运行 Deploy）才生效。
+
+部署以 `wrangler.toml` 作为 Pages 项目配置的唯一来源，文件里没有 `[vars]`，控制台中的明文变量可能在部署时被清除，加密变量不受影响。建议所有变量都以「加密 / Secret」类型添加。
 
 | 变量 | 默认 | 作用 |
 |---|---|---|
-| `SUB_PUBLIC` | 公开 | 设为 `0` 后，`/sub`、`/best`、`/versions` 必须带只读 token |
+| `SUB_PUBLIC` | 公开 | 设为 `0` 后，`/sub`、`/best`、`/versions` 必须带只读 token（edgetunnel 探测请求除外，只返回候选 IP） |
 | `SUB_READ_TOKEN` | 空 | 只读 token（`?t=` 或 `Authorization: Bearer`），用于订阅类接口 |
 | `SUB_TOKEN` | 空 | 管理 token，用于 `/health/full`、`/api/template`、`/api/ip-feedback` 等；也可以用 `/setup.html` 存进 KV |
 | `SETUP_CODE` | 空 | 开启网页设置管理 token 所需的设置码（至少 8 位） |
@@ -216,7 +218,7 @@ Clash / Stash 输出里的地区分组按同一规则归类。
 | `SUB_TOKEN_ROTATE_DAYS` | 只读 token 按天数周期自动派生轮换，默认关闭 |
 | `SUB_ALLOWED_IPS` | token 鉴权接口的来源 IP 白名单，逗号分隔 |
 | `ALLOW_QUERY_TOKEN` | `1`：管理接口额外接受 `?token=`（默认只接受 `Authorization: Bearer`） |
-| `IP_HASH_SALT` | 测速反馈中访客 IP 哈希的盐；不填时使用 `SUB_TOKEN` |
+| `IP_HASH_SALT` | 测速反馈中访客 IP 哈希的盐；不填时使用 `SUB_TOKEN`，两者都没有时不加盐 |
 | `SUB_RTT_DROP_MS` | 实测延迟超过该值不算通过，默认 `1000` |
 | `SUB_PREFERRED_PORTS` | 覆盖端口优先顺序，如 `443,8443,2053` |
 | `SUB_ROTATE_HOSTS` / `CHECK_HOSTS` | 与 Actions 同名变量含义相同，Pages 端优先 |
@@ -248,7 +250,7 @@ Clash / Stash 输出里的地区分组按同一规则归类。
 2. **手机实测加权。** [cf-termux-pick](https://github.com/LeilaoMi/cf-termux-pick) 回传的结果：WiFi ×1.5，蜂窝网络 ×1.2；出口不在国内（开着 VPN）跑出的结果不收。
 3. **稳定排序分。** 延迟按 20ms 分档；失败率加罚；已知落地机房不在近端（香港、台北、东京、大阪、首尔、新加坡、吉隆坡、曼谷、马尼拉，以及美西 LAX / SJC / SFO / SEA）时加罚 80ms；最近一次成功实测每旧 12 小时加罚 10ms（最多 60ms）。加权后失败多于成功的 IP 直接剔除。
 4. **输出顺序。** 国内实测通过的排最前；新鲜实测不足 `SUB_MIN_NODES` 时，先并入自己的国内快照（排在新鲜实测之后），仍不足再并入社区池（排在最后）；然后是 `sources/edge/manual.txt` 手动置顶；还不足 `SUB_MIN_NODES` 时用过审池按固定顺序补齐。
-5. **落地白名单。** 开了 `SUB_LANDING` 时：落地在白名单外的剔除；没有机房信息的（浏览器测速、旧 TCP 记录）不算实测通过；不再用未实测节点补位。
+5. **落地白名单。** 开了 `SUB_LANDING` 时：落地在白名单外的剔除；没有机房信息的（浏览器测速、旧 TCP 记录）不算实测通过；不再用未实测节点补位。白名单不是硬保证：未实测的手动置顶仍会保留；过滤后一个不剩时退回原候选列表，避免订阅为空。
 6. **按 /24 分配额度。** 每轮国内实测：先测手动置顶和近期通过的 IP；一个 /24 测过 3 个以上 IP 都不通的，只留少量探索额度；有 IP 通过的网段里没测过的 IP 优先。
 7. **反代 IP。** 美国反代池中没测过的 IP 每轮固定拿 40% 额度；国内实测通过后排序加 `SUB_RELAY_BONUS_MS`（默认 60ms）。
 8. **端口。** TLS 订阅只保留 TLS 端口（443、8443、2053、2083、2087、2096），默认 443 优先。
@@ -274,7 +276,7 @@ Globalping 的国内探针多在家宽或机房，不等于你的手机线路。
 第二种方式的安装与使用见 [docs/termux.md](docs/termux.md)。
 
 > [!IMPORTANT]
-> `update.yml` 每轮还会从**仓库主人自己的** `<你的用户名>/cf-termux-pick` 拉取 `best-ips.txt`，同步为当次运行的手动置顶（不提交回仓库）；没有这个仓库或拉不到时沿用 `sources/edge/manual.txt`。Fork 后无需改工作流。
+> `update.yml` 每轮还会从**仓库主人自己的** `<你的用户名>/cf-termux-pick` 拉取 `best-ips.txt`，同步为当次运行的手动置顶（不提交回仓库）；没有这个仓库或拉不到时沿用 `sources/edge/manual.txt`。Fork 后无需改工作流。该仓库需设为**公开**：工作流用默认 token 检出，默认不支持私有仓库。
 
 ## 接口与状态页
 
@@ -330,11 +332,11 @@ China Probe 与 China Host Check 共用一个并发组，不会同时写 KV。
 
 ## 安全
 
-- **匿名请求拿不到你的节点参数。** `/sub` 默认公开，但匿名请求只能使用 URL 里自带的节点参数；服务端模板只对带只读 token 的请求生效。想彻底关闭匿名访问，在 Pages 设 `SUB_PUBLIC=0`。
+- **匿名请求拿不到你的节点参数。** `/sub` 默认公开，但匿名请求只能使用 URL 里自带的节点参数；服务端模板只对带只读 token 的请求生效。在 Pages 设 `SUB_PUBLIC=0` 后普通 `/sub` 必须带 token，但 edgetunnel 探测请求（占位参数 + UA 含 `edgetunnel`）仍可匿名拿到候选 IP，返回内容不含服务端节点模板。
 - **管理 token 只走请求头。** 管理接口默认只接受 `Authorization: Bearer`，不要把管理 token 拼进 URL 或客户端订阅。
 - **网页设置防抢占。** `/setup.html` 需要先在 Pages 设 `SETUP_CODE`（至少 8 位）并重新部署；管理 token 至少 12 位，KV 中只存 SHA-256 哈希，设置后锁定。已配 `SUB_TOKEN` 环境变量时网页设置自动关闭。
 - **状态页打码。** `/status` 对匿名访问只显示 `a***.example.com` 这样的域名。
-- **访客隐私。** 测速反馈中访客 IP 只存加盐哈希；未绑定 D1 时，匿名测速结果不落库。
+- **访客隐私。** 测速反馈中访客 IP 只存哈希；盐取 `IP_HASH_SALT`，未设时用 `SUB_TOKEN`，两者都没有时不加盐，建议单独设置 `IP_HASH_SALT`。未绑定 D1 时，匿名测速结果不落库。
 - **静态页面安全头。** `public/_headers` 禁止被 iframe 嵌入并带 CSP；`robots.txt` 禁止索引。
 - **仓库扫描。** Security 工作流在 push 与 PR 上做密钥泄露与代码扫描。请勿把真实 UUID、token 提交进仓库。
 
@@ -353,7 +355,7 @@ China Probe 与 China Host Check 共用一个并发组，不会同时写 KV。
 <details>
 <summary><b>连接报 <code>error code: 1034</code> 或 403？</b></summary>
 
-这个 IP 不服务你的域名。填好 `CHECK_HOSTS` 后，组合测会把这类 IP 识别出来并排除。
+这个 IP 不服务你的域名。填好 `CHECK_HOSTS` 后，组合测会对国内快照中排名前 `CN_COMBO_TOP`（默认 10）个 IP 做 IP × 域名实测，遇到 1034 记一次失败。这只是降权，不保证排除：加权后成功仍多于失败的 IP 依然会进订阅。
 
 </details>
 
