@@ -428,7 +428,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   // 匿名额度 250 次/小时（按出口 IP，GitHub runner 上与他人共享），强烈建议配 GLOBALPING_TOKEN
   // 有 token 时 500 次/小时，与 China Host Check 共用；每个目标 3 次，默认 120 个目标留出余量
   const budget = Number(process.env.CN_PROBE_BUDGET) || (token ? 120 : 60);
-  // 社区实测池默认关闭；填 COMMUNITY_POOL_URL（如 https://yxdy.woniu.bee.al/cn-verified）才拉取
+  // 社区实测池默认关闭；填 COMMUNITY_POOL_URL（如 https://sub.example.com/cn-verified）才拉取
   const communityUrl = process.env.COMMUNITY_POOL_URL || "";
   // PUBLIC_CN_VERIFIED=1：公开 /cn-verified，把你的国内已验证 IP 分享给复刻者（只有 IP、延迟、机房，不含域名）
   const publicVerified = process.env.PUBLIC_CN_VERIFIED === "1";

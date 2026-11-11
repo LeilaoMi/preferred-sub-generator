@@ -447,6 +447,15 @@ async function fetchRemoteSource(source, { fetchImpl, maxSourceBytes }) {
   }
 }
 
+// 源上标了 repo（如作者自建的私有接口）时只在同名仓库启用，Fork 不继承，避免依赖别人的域名。
+export function filterSourcesForRepo(sources = [], repo = "") {
+  const current = String(repo || "").toLowerCase();
+  return sources.filter((source) => {
+    if (!source || typeof source !== "object" || !source.repo) return true;
+    return String(source.repo).toLowerCase() === current;
+  });
+}
+
 export async function collectCandidatesWithHealth({ manualText = "", remoteSources = [], fetchImpl = fetch, maxSourceBytes = DEFAULT_MAX_SOURCE_BYTES, extraBlacklist = "", allowRelay = true } = {}) {
   const manualCandidates = parseText(manualText, "edge-manual");
   const candidates = [...manualCandidates];

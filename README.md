@@ -274,7 +274,7 @@ Globalping 的国内探针多在家宽或机房，不等于你的手机线路。
 第二种方式的安装与使用见 [docs/termux.md](docs/termux.md)。
 
 > [!IMPORTANT]
-> `update.yml` 每轮还会从 **`LeilaoMi/cf-termux-pick`** 仓库拉取 `best-ips.txt`，同步为当次运行的手动置顶（不提交回仓库）；拉不到时沿用仓库里的 `sources/edge/manual.txt`。这个仓库名目前写死在工作流里，Fork 用户如果想用自己的结果，需要改 `.github/workflows/update.yml` 里的 `repository:`。
+> `update.yml` 每轮还会从**仓库主人自己的** `<你的用户名>/cf-termux-pick` 拉取 `best-ips.txt`，同步为当次运行的手动置顶（不提交回仓库）；没有这个仓库或拉不到时沿用 `sources/edge/manual.txt`。Fork 后无需改工作流。
 
 ## 接口与状态页
 
@@ -449,6 +449,8 @@ docs/                详细文档
 | bestcf.pages.dev | `uouin`、`nirevil`、`s5gy` 聚合 |
 | [NiREvil/vless](https://github.com/NiREvil/vless) | `country_proxies/US.txt` |
 | 其他 | wetest.vip、vps789.com、zip.cm.edu.kg、countrymerge.pages.dev |
+
+> 标了 `repo` 字段的源（如作者自建的接口）只在对应仓库启用，Fork 自动跳过。
 
 <details>
 <summary>升级过程中参考过的开源项目</summary>

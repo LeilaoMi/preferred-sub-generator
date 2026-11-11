@@ -5,7 +5,7 @@ import { formatEdgeNodeName } from "../src/utils/colo.js";
 import { isAllowedLanding, resolveLanding } from "../src/utils/landing.js";
 import { getPortsForSecurity } from "../src/utils/ports.js";
 import { checkCandidates } from "./lib/check.js";
-import { collectCandidatesWithHealth, isIPv6 } from "./lib/candidates.js";
+import { collectCandidatesWithHealth, filterSourcesForRepo, isIPv6 } from "./lib/candidates.js";
 import { downloadSpeed } from "./lib/speed.js";
 import { runAlertStage } from "./lib/alert.js";
 import { sendNotification } from "./lib/notify.js";
@@ -480,7 +480,7 @@ export async function main() {
     if (!process.env[name]) throw new Error(`Missing required env: ${name}`);
   }
 
-  const remoteSources = await readJsonFile("sources/edge/remote.json", []);
+  const remoteSources = filterSourcesForRepo(await readJsonFile("sources/edge/remote.json", []), process.env.GITHUB_REPOSITORY);
   const manualText = await readTextFile("sources/edge/manual.txt");
   const previousBestIps = await readPreviousBestIps();
   const previousTrend = await readPreviousTrendHistory();

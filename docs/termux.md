@@ -55,4 +55,4 @@ sv-enable crond          # 装完需重开一次 Termux
 
 把你确认能用的 IP 或优选域名写进 `sources/edge/manual.txt`（每行一个，`IP`、`IP:端口` 或 `域名:端口`）。即使美国初筛连不上，它们也会留在候选池里，订阅时排在国内实测节点之后、补位节点之前。
 
-> 注意：Update 工作流运行时会用 `LeilaoMi/cf-termux-pick` 仓库的 `best-ips.txt` 替换 `manual.txt` 中的 IP 行（只在当次运行中，不提交）；拉取失败时才使用仓库里的内容。
+> 注意：Update 工作流运行时会用仓库主人自己的 `<你的用户名>/cf-termux-pick` 仓库的 `best-ips.txt` 替换 `manual.txt` 中的 IP 行（只在当次运行中，不提交）；拉取失败时才使用仓库里的内容。

@@ -130,7 +130,7 @@
 
 每行一个 `IP`、`IP:端口`、`域名:端口` 或 IPv4 CIDR，`#` 开头为注释。手动条目即使美国初筛不通过也保留在池里，订阅时排在国内实测节点之后。`npm run validate:sources` 会校验格式。
 
-> Update 工作流会在运行时用 `LeilaoMi/cf-termux-pick` 仓库的 `best-ips.txt` 替换本文件中的 IP 行（不提交），拉不到时沿用本文件。
+> Update 工作流会在运行时用仓库主人自己的 `<owner>/cf-termux-pick` 仓库的 `best-ips.txt` 替换本文件中的 IP 行（不提交），拉不到时沿用本文件。
 
 ### `sources/edge/remote.json`
 
@@ -145,6 +145,7 @@
 | `cidrSamples` | 每个 CIDR 抽样的 IP 数 |
 | `minSpeed` | CSV 源的速度下限 |
 | `cfOnly` | 只保留落在 Cloudflare 官方 IPv4 段内的 IP |
+| `repo` | 只在这个仓库（`owner/name`）启用，Fork 自动跳过；用于作者自建的私有接口 |
 | `relay` / `relayOnly` | 反代源；`relayOnly` 会剔除混入的 Cloudflare 官方段 IP |
 | `country` | 只保留注释中带该国家代码的行（如 `#US`） |
 | `ports` | 只保留这些端口（未写端口的按 443） |
