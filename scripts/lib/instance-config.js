@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ALLOWED = new Set(["CHECK_HOSTS", "SUB_DEFAULT_ISP", "VLESS_HOST", "VLESS_SNI", "SUB_DOMAIN", "CN_COMBO_TOP", "SUB_ROTATE_HOSTS", "PUBLIC_CN_VERIFIED", "COMMUNITY_POOL_URL", "CN_PROBE_BUDGET", "CN_PROBE_MODE", "SUB_LANDING"]);
+const ALLOWED = new Set(["CHECK_HOSTS", "SUB_DEFAULT_ISP", "VLESS_HOST", "VLESS_SNI", "SUB_DOMAIN", "CN_COMBO_TOP", "SUB_ROTATE_HOSTS", "PUBLIC_CN_VERIFIED", "COMMUNITY_POOL_URL", "CN_PROBE_BUDGET", "CN_PROBE_MODE", "SUB_LANDING", "CN_PENDING_MAX"]);
 
 export function resolveInstanceConfig(config, repository) {
   const entry = config && repository ? config[repository] : null;

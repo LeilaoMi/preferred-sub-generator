@@ -98,7 +98,7 @@ Clash 的地区分组也按同一规则归类。
 | `SUB_ROTATE_HOSTS` | Variable | `1`：直接订阅时，节点域名轮换为该运营商未被墙的 `CHECK_HOSTS`（这些域名须绑在同一个 edgetunnel 上；对 `sub://` 无效） |
 | `ALLOW_RELAY` | Variable | 默认放行社区反代 IP；`0` 只用 Cloudflare 官方 IPv4 |
 | `CN_PENDING_MAX` | Variable | 待国内验证的反代池上限，默认 500（美国反代排前面） |
-| `SUB_RELAY_BONUS_MS` | Variable | 反代 IP 国内实测通过时排序加分，默认 60（ms）；`0` 关掉 |
+| `SUB_RELAY_BONUS_MS` | Pages 环境变量 | 反代 IP 国内实测通过时排序加分，默认 60（ms）；`0` 关掉（在 Cloudflare Pages 项目设置里配，Actions 变量无效） |
 | `EDGE_BLACKLIST` | Variable | 额外拉黑的网段，逗号分隔 CIDR |
 | `PUBLIC_CN_VERIFIED` | Variable | `1`：公开 `/cn-verified`，只含 IP、端口、延迟、成功率、机房 |
 | `COMMUNITY_POOL_URL` | Variable | 用别人公开的 `/cn-verified` 做冷启动，永远排在自己数据之后 |
