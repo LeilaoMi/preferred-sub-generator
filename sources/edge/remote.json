@@ -129,12 +129,12 @@
   },
   {
     "name": "relay-us-fofa",
-    "file": "sources/relay/us-fofa.txt",
-    "type": "text",
+    "type": "scrape",
     "relay": true,
     "ports": [
       443
     ],
-    "relayOnly": true
+    "relayOnly": true,
+    "dir": "sources/relay/fofa"
   }
 ]

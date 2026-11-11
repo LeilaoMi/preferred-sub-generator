@@ -115,3 +115,17 @@ test("selectVerifiedNodes：反代实测通过时排序加分，SUB_RELAY_BONUS_
   assert.deepEqual(selectVerifiedNodes(nodes, scores, { env: { SUB_RELAY_BONUS_MS: "0" } }).map((n) => n.address), ["104.16.0.1", "9.9.9.1"]);
   assert.equal(readRelayBonusMs({ SUB_RELAY_BONUS_MS: "abc" }), 60);
 });
+
+test("dir 源：读文件夹里所有 .txt/.csv/.gz（FOFA 导出直接上传）", async () => {
+  const fs = await import("node:fs/promises");
+  const os = await import("node:os");
+  const { gzipSync } = await import("node:zlib");
+  const dir = await fs.mkdtemp(`${os.tmpdir()}/fofa-`);
+  await fs.writeFile(`${dir}/a.csv`, "host,ip,port,title\nhttps://x.com,7.7.7.7,443,\"Forbidden, 403\"\n");
+  await fs.writeFile(`${dir}/b.csv.gz`, gzipSync("host,ip,port\n8.8.4.4:443,8.8.4.4,443\n"));
+  await fs.writeFile(`${dir}/ignore.md`, "9.9.9.9");
+  const { candidates } = await collectCandidatesWithHealth({
+    remoteSources: [{ name: "relay-us-fofa", dir, type: "scrape", relay: true, ports: [443], relayOnly: true }],
+  });
+  assert.deepEqual(candidates.map((c) => `${c.address}:${c.port}`), ["7.7.7.7:443", "8.8.4.4:443"]);
+});

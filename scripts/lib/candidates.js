@@ -371,13 +371,28 @@ export function applySourceFilters(candidates, source) {
   }).map((candidate) => (ports && !candidate.port ? { ...candidate, port: 443 } : candidate));
 }
 
-async function readLocalSource(path) {
+async function readLocalFile(path) {
   const { readFile } = await import("node:fs/promises");
-  return readFile(path, "utf8");
+  const buf = await readFile(path);
+  // FOFA 导出有时是 .gz（或手机上传时被压缩），按 gzip 魔数自动解压
+  if (buf[0] === 0x1f && buf[1] === 0x8b) {
+    const { gunzipSync } = await import("node:zlib");
+    return gunzipSync(buf).toString("utf8");
+  }
+  return buf.toString("utf8");
+}
+
+// 本地源：file 指向单个文件；dir 指向文件夹，读里面所有 .txt/.csv/.gz（手机网页直接上传 FOFA 导出即可）
+async function readLocalSource(source) {
+  if (source.file) return readLocalFile(source.file);
+  const { readdir } = await import("node:fs/promises");
+  const names = (await readdir(source.dir).catch(() => [])).filter((name) => /\.(txt|csv|gz)$/i.test(name)).sort();
+  const texts = await Promise.all(names.map((name) => readLocalFile(`${source.dir}/${name}`)));
+  return texts.join("\n");
 }
 
 async function fetchRemoteSource(source, { fetchImpl, maxSourceBytes }) {
-  const file = typeof source === "object" && source ? source.file : "";
+  const file = typeof source === "object" && source ? source.file || source.dir : "";
   const url = typeof source === "string" ? source : source.url || file;
   const sourceName = getSourceName(source, url);
   const startedAt = Date.now();
@@ -391,8 +406,8 @@ async function fetchRemoteSource(source, { fetchImpl, maxSourceBytes }) {
     let body;
     let status = 200;
     if (file) {
-      // 仓库内文件（如 sources/relay/us-fofa.txt，手动从 FOFA 导出后提交）
-      body = await (typeof source.readFileImpl === "function" ? source.readFileImpl(file) : readLocalSource(file));
+      // 仓库内文件或文件夹（如 sources/relay/fofa/，FOFA 导出的 CSV 直接传进去）
+      body = await (typeof source.readFileImpl === "function" ? source.readFileImpl(file) : readLocalSource(source));
     } else {
       // P0-1: 单源超时，挂掉的源不拖死整轮抓取；signal 透传给 fetchImpl，mock 忽略多余参数也不会炸
       const signal = typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(DEFAULT_SOURCE_TIMEOUT_MS) : undefined;
