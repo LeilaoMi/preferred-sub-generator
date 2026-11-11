@@ -22,13 +22,13 @@ jobs:
         with:
           persist-credentials: false
 
-      # cf-termux-pick 已公开，无需 token；拉取失败不阻塞，沿用现有 manual.txt
+      # 拉取仓库主人自己的 cf-termux-pick（手机实测结果，需公开）；Fork 没有这个仓库时跳过，沿用现有 manual.txt
       - name: Pull best IPs from cf-termux-pick
         continue-on-error: true
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-          repository: LeilaoMi/cf-termux-pick
+          repository: ${{ github.repository_owner }}/cf-termux-pick
           path: cf-termux-pick
           sparse-checkout: |
             best-ips.txt

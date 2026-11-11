@@ -12,7 +12,7 @@ const HELP = `用法: node scripts/probe-ips.js [选项]
 回传到 /api/ip-feedback，之后订阅会按你的实测结果重排。
 
 选项:
-  --site <url>          站点地址（默认 env SITE_URL，如 https://yxdy.woniu.bee.al）
+  --site <url>          站点地址（默认 env SITE_URL，如 https://sub.example.com）
   --token <token>       管理 token（默认 env SUB_TOKEN；无 token 时加 --no-submit 只测不回传）
   --n <count>           探测节点数量（默认 50）
   --samples <n>         每个 IP 的 TCP 握手采样次数（默认 3）；成功数过半才算可用，
@@ -30,9 +30,9 @@ const HELP = `用法: node scripts/probe-ips.js [选项]
   --help                显示帮助
 
 示例:
-  node scripts/probe-ips.js --site https://yxdy.woniu.bee.al --token "$SUB_TOKEN"
+  node scripts/probe-ips.js --site https://sub.example.com --token "$SUB_TOKEN"
   node scripts/probe-ips.js --slot 2 --speed 5 --colo auto
-  node scripts/probe-ips.js --sni 2.leilaomi.ccwu.cc
+  node scripts/probe-ips.js --sni node.example.com
 `;
 
 function parseTrace(text) {

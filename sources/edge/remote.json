@@ -32,7 +32,8 @@
     "name": "cfbestip-sub",
     "url": "https://bestip.leilaomi.cc.cd/sub?comment=0&top=200",
     "type": "text",
-    "cfOnly": true
+    "cfOnly": true,
+    "repo": "LeilaoMi/preferred-sub-generator"
   },
   {
     "name": "uouin",

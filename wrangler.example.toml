@@ -10,7 +10,7 @@ binding = "SUB_KV"
 id = "replace_with_your_cloudflare_kv_namespace_id"
 
 # D1：测速反馈的首选存储（趋势面板、按天聚合）。
-# 创建方式见 docs/d1-setup.md。
+# 创建方式见 docs/cloudflare-setup.md 的「D1（可选）」一节。
 # 未绑定 SPEED_DB 时，代码自动回退到 KV 的 SPEED_FEEDBACK key，功能不受影响。
 # [[d1_databases]]
 # binding = "SPEED_DB"

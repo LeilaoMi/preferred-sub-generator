@@ -129,3 +129,11 @@ test("dir 源：读文件夹里所有 .txt/.csv/.gz（FOFA 导出直接上传）
   });
   assert.deepEqual(candidates.map((c) => `${c.address}:${c.port}`), ["7.7.7.7:443", "8.8.4.4:443"]);
 });
+
+test("filterSourcesForRepo：标了 repo 的源只在同名仓库启用，Fork 跳过", async () => {
+  const { filterSourcesForRepo } = await import("../scripts/lib/candidates.js");
+  const sources = [{ name: "a", url: "x" }, { name: "own", url: "y", repo: "LeilaoMi/preferred-sub-generator" }];
+  assert.deepEqual(filterSourcesForRepo(sources, "leilaomi/Preferred-Sub-Generator").map((s) => s.name), ["a", "own"]);
+  assert.deepEqual(filterSourcesForRepo(sources, "someone/preferred-sub-generator").map((s) => s.name), ["a"]);
+  assert.deepEqual(filterSourcesForRepo(sources, "").map((s) => s.name), ["a"]);
+});

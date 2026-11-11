@@ -1,137 +1,86 @@
-# Cloudflare 设置说明
+# Cloudflare 配置说明
 
-本文记录当前仓库实际需要的 Cloudflare 资源、环境变量和上线验证方式，不包含任何真实密钥。
+正常情况下不需要手动配置 Cloudflare：Fork 后填好 `CLOUDFLARE_API_TOKEN` 和 `CLOUDFLARE_ACCOUNT_ID`，工作流里的 `scripts/cf-bootstrap.js` 会自动准备所有资源（见 [README 快速开始](../README.md#快速开始)）。
 
-## 当前实际部署
+本文用于：确认 API 令牌权限、理解自动创建了什么、在 Pages 上设置环境变量、手动部署和排错。本文不含任何真实密钥或资源 ID。
 
-```text
-生产自定义域名：https://your-domain.example.com
-Pages 项目名：your-pages-project
-最近验证预览：https://3b090ee2.pre
-KV 绑定变量：SUB_KV
-KV Namespace ID：<your-kv-namespace-id>
-```
+## 1. API 令牌权限
 
-线上已验证：
+在 Cloudflare「我的个人资料 → API 令牌」创建自定义令牌，资源范围选你的账户：
 
-```text
-/status                         HTTP 200
-/health                         HTTP 200
-/api/read-token                 匿名 HTTP 200，仅 { configured: true }；带管理 token 才返回 readToken
-/sub?type=v2rayng&t=只读token   HTTP 200，返回 base64 订阅
-/best?n=2&t=只读token           HTTP 200，返回 JSON
-```
+| 权限 | 是否必需 | 用途 |
+|---|---|---|
+| 账户 → Cloudflare Pages → 编辑 | 必需 | 创建 Pages 项目、部署 |
+| 账户 → Workers KV 存储 → 编辑 | 必需 | 创建 / 读写 KV |
+| 账户 → D1 → 编辑 | 可选 | 创建 D1；没有时测速反馈和逐 IP 实测改存 KV |
 
-## 1. KV Namespace
+令牌填到 GitHub 仓库的 Secret `CLOUDFLARE_API_TOKEN`（旧名 `CLOUDFLARE_API_TOKEN_2` 也兼容）。
 
-Cloudflare KV Namespace 用来保存：
+## 2. 自动创建的资源
 
-```text
-TEMPLATE                 默认原始 VLESS 模板，由网页保存
-TEMPLATE_1..TEMPLATE_5   可选多模板槽位
-BEST_IPS                 最新优选 Edge IP 列表
-BEST_IPS_LAST            最近一次写入的优选结果
-BEST_IPS_LATEST_VERSION  最近版本 key
-BEST_IPS_VERSION_INDEX   最近版本索引，默认只保留 30 个 BEST_IPS_* 快照
-BEST_IPS_TREND           最近 7 次刷新趋势
-STATUS                   更新时间、可用数量、检测状态等
-SOURCE_HEALTH            最近一次候选源抓取健康报告
-TEMPLATE_AUDIT           最近一次模板更新审计信息
-SPEED_FEEDBACK           浏览器本地测速反馈
-LAST_RUN_*               最近一次 GitHub Actions 自动刷新结果
-```
+每个工作流开始时都会运行 `cf-bootstrap.js`：
 
-Namespace ID 同步到：
+| 资源 | 名称 | 行为 |
+|---|---|---|
+| KV 命名空间 | `preferred-sub-generator-kv` | 按名称查找，没有就创建。已设 Secret `CLOUDFLARE_NAMESPACE_ID` 时直接用它 |
+| D1 数据库 | `speed-feedback` | 按名称查找，没有就创建；失败只告警，不影响运行 |
+| Pages 项目 | `preferred-sub-generator`（Actions 变量 `PAGES_PROJECT` 可改） | 仅 Deploy 工作流会创建，生产分支 `main` |
 
-- `wrangler.toml` 的 `kv_namespaces.id`
-- GitHub Secret：`CLOUDFLARE_NAMESPACE_ID`
-
-## 2. Cloudflare Pages 项目
-
-Pages 项目设置：
-
-```text
-项目名：your-pages-project
-构建命令：留空
-构建输出目录：public
-Functions 目录：functions
-KV 绑定变量名：SUB_KV
-```
+脚本会在运行时重写 `wrangler.toml`，写入当前账户的 KV / D1 ID（绑定名分别为 `SUB_KV`、`SPEED_DB`）。仓库里提交的 `wrangler.toml` 是上游实例的配置，Fork 无需修改；ID 不是密钥，公开没有风险。
 
 ## 3. Pages 环境变量
 
-生产环境必须设置：
+在 Cloudflare 控制台：**Workers 和 Pages → 你的 Pages 项目 → 设置 → 变量和机密**。可用变量见 [README · Cloudflare Pages 环境变量](../README.md#cloudflare-pages-环境变量)，最常用的是：
 
-```text
-SUB_TOKEN        管理 token，只用于 /api/template 和 /health/full
-SUB_READ_TOKEN   只读 token，用于 /sub、/best、/versions；首页用管理 token 从 /api/read-token 换取并自动拼到订阅 URL
+| 变量 | 说明 |
+|---|---|
+| `SUB_TOKEN` | 管理 token |
+| `SUB_READ_TOKEN` | 只读 token |
+| `SUB_PUBLIC` | 设 `0` 关闭匿名订阅 |
+| `SETUP_CODE` | 开启 `/setup.html` 网页设置管理 token |
+
+注意：
+
+- 改完变量需要重新部署才生效（push 到 `main`，或在 Actions 手动运行 **Deploy to Cloudflare Pages**）。
+- 部署使用仓库里的 `wrangler.toml`，它是 Pages 项目配置的唯一来源，绑定（KV、D1）以文件为准。文件里没有 `[vars]`，控制台中的明文变量可能在部署时被清除，加密变量不受影响，因此建议所有变量都以「机密 / Secret」类型添加。
+- 如果发现部署后管理 token 失效，可以改用 `/setup.html` 把管理 token 的哈希存进 KV，KV 不受重新部署影响。
+
+## 4. D1（可选）
+
+D1 用于保存浏览器测速反馈（`speed_feedback` 表）和逐 IP 实测回传（`ip_feedback` 表），支持 `/admin.html` 的按天趋势。未绑定时自动回退 KV（各保留最近 500 条），并且匿名的浏览器测速不会落库。
+
+自动创建失败时，先确认 Actions 使用的令牌带有「账户 → D1 → 编辑」权限；补上权限后重新运行 **Deploy to Cloudflare Pages**，`cf-bootstrap.js` 会找到或创建数据库，并在 `wrangler.toml` 中写入 `SPEED_DB` 绑定。
+
+也可以手动创建：
+
+```bash
+npx wrangler d1 create speed-feedback
 ```
 
-可选环境变量：
+然后在 Pages 项目 **设置 → 绑定 → 添加 → D1 数据库**，变量名填 `SPEED_DB`。表结构会在首次写入时自动创建，无需手动建表。
 
-```text
-SUB_READ_TOKEN_NEXT        只读 token 轮换期间的新 token
-SUB_TOKEN_NEXT             管理 token 轮换期间的新 token
-SUB_ALLOWED_IPS            管理接口 IP 白名单，多个 IP 用英文逗号分隔
-SUB_PUBLIC=1               显式公开 /sub 和 /best，不推荐
-ALLOW_QUERY_TOKEN=1        临时允许 /api/template?token=，默认关闭
-SOURCE_MAX_BYTES=5242880   远程候选源最大读取字节数，默认 5MB
-REQUIRE_CF_RAY=1           只保留带 cf-ray 的 Cloudflare Edge 验证结果，默认开启
-ALLOW_TCP_ONLY=1           兼容 TCP 可达但无 cf-ray 的结果，默认关闭
-VERSION_RETENTION=30       BEST_IPS_* 版本快照保留数量，默认 30
-UPDATE_WEBHOOK_URL         告警 Webhook，仅状态变化/恶化/恢复/运行失败时推送
-```
+## 5. 手动部署
 
-安全边界：
-
-- `/sub`、`/best`、`/versions` 默认公开（匿名只能用 URL 自带参数）；设 `SUB_PUBLIC=0` 后才需要只读 token。
-- `/api/read-token` 默认只返回 `{ configured }`；带 `Authorization: Bearer <SUB_TOKEN>` 才返回 `SUB_READ_TOKEN` 的值，目的是让首页生成可直接导入客户端的订阅 URL，同时避免匿名访客拉走只读 token。
-- `/api/template` 和 `/health/full` 使用管理 token `SUB_TOKEN`，默认只接受 `Authorization: Bearer <SUB_TOKEN>`。
-- 管理 token 不要拼进 URL，也不要给客户端订阅使用。
-
-## 4. GitHub Secrets
-
-在 GitHub 仓库 Settings → Secrets and variables → Actions 中配置：
-
-```text
-CLOUDFLARE_API_TOKEN_2    用于 GitHub Actions 写 KV 的 Cloudflare API Token
-CLOUDFLARE_ACCOUNT_ID     Cloudflare Account ID
-CLOUDFLARE_NAMESPACE_ID   KV Namespace ID
-```
-
-原始 VLESS 节点通过首页本地粘贴生成订阅链接，不要写进 GitHub Secrets 或仓库文件；`/api/template` POST 已停用（410），旧版“网页保存到 KV 的 `TEMPLATE`”流程已作废。
-
-## 5. 本地验证
+需要 Node.js 和 Wrangler 4：
 
 ```bash
 npm test
 npm run preflight
-npm run validate:sources
+CLOUDFLARE_API_TOKEN=你的令牌 CLOUDFLARE_ACCOUNT_ID=你的账户ID \
+  npx wrangler pages deploy public --project-name=preferred-sub-generator --branch=main
 ```
 
-## 6. 部署
+手动部署前请确认 `wrangler.toml` 里的 KV / D1 ID 属于你自己的账户（可参考 `wrangler.example.toml`）。
+
+## 6. 上线验证
 
 ```bash
-CLOUDFLARE_API_TOKEN="$CLOUDFLARE_API_TOKEN_2" \
-  npx wrangler pages deploy public \
-  --project-name your-pages-project \
-  --branch main \
-  --commit-dirty=true
+curl https://你的域名/status
+curl https://你的域名/health
+curl -H "Authorization: Bearer 你的SUB_TOKEN" https://你的域名/health/full
+curl https://你的域名/api/read-token          # 匿名只返回 { "configured": ... }
+curl -H "User-Agent: edgetunnel" \
+  "https://你的域名/sub?host=example.com&uuid=00000000-0000-4000-8000-000000000000"
 ```
 
-## 7. 上线后验证
-
-```text
-https://your-domain.example.com/status
-https://your-domain.example.com/health
-https://your-domain.example.com/api/read-token   # 匿名只返回 { configured: true }
-https://your-domain.example.com/health/full   # 需要 Authorization: Bearer 你的SUB_TOKEN
-https://your-domain.example.com/sub?type=v2rayng&t=你的SUB_READ_TOKEN
-https://your-domain.example.com/sub?type=clash&t=你的SUB_READ_TOKEN
-https://your-domain.example.com/sub?type=singbox&t=你的SUB_READ_TOKEN
-https://your-domain.example.com/sub?type=shadowrocket&t=你的SUB_READ_TOKEN
-https://your-domain.example.com/best?n=20&t=你的SUB_READ_TOKEN
-https://your-domain.example.com/versions?t=你的SUB_READ_TOKEN
-```
-
-如必须公开订阅，才设置 `SUB_PUBLIC=1`。公开 `/health` 只返回最小状态，详细健康信息放在需要管理 token 的 `/health/full`。
+最后一条模拟 edgetunnel 的拉取，应返回 base64 文本。各接口说明见 [reference.md](reference.md)。
