@@ -84,5 +84,57 @@
     "url": "https://vps789.com/openApi/cfIpApi",
     "type": "scrape",
     "cfOnly": true
+  },
+  {
+    "name": "relay-us-zip",
+    "url": "https://zip.cm.edu.kg/all.txt",
+    "type": "text",
+    "relay": true,
+    "country": "US",
+    "ports": [
+      443
+    ],
+    "relayOnly": true
+  },
+  {
+    "name": "relay-us-countrymerge",
+    "url": "https://countrymerge.pages.dev/all.txt",
+    "type": "text",
+    "relay": true,
+    "country": "US",
+    "ports": [
+      443
+    ],
+    "relayOnly": true
+  },
+  {
+    "name": "relay-us-nirevil",
+    "url": "https://raw.githubusercontent.com/NiREvil/vless/main/sub/country_proxies/US.txt",
+    "type": "text",
+    "relay": true,
+    "ports": [
+      443
+    ],
+    "relayOnly": true
+  },
+  {
+    "name": "relay-us-cmliu-dns",
+    "url": "https://dns.google/resolve?name=ProxyIP.US.CMLiussss.net&type=A",
+    "type": "scrape",
+    "relay": true,
+    "ports": [
+      443
+    ],
+    "relayOnly": true
+  },
+  {
+    "name": "relay-us-fofa",
+    "type": "scrape",
+    "relay": true,
+    "ports": [
+      443
+    ],
+    "relayOnly": true,
+    "dir": "sources/relay/fofa"
   }
 ]

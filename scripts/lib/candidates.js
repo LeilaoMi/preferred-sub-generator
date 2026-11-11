@@ -186,6 +186,12 @@ function parseText(text, source, maxCidrSamples = DEFAULT_CIDR_SAMPLES) {
   for (const raw of String(text || "").split(/\r?\n/)) {
     const line = stripComment(raw).trim();
     if (!line) continue;
+    // 「IP 端口」两列格式（NiREvil country_proxies/US.txt 这类），整行当成一个 IP:端口
+    const pair = line.match(/^(\d{1,3}(?:\.\d{1,3}){3})\s+(\d{1,5})$/);
+    if (pair && isIPv4(pair[1]) && Number(pair[2]) >= 1 && Number(pair[2]) <= 65535) {
+      candidates.push({ address: pair[1], port: Number(pair[2]), source });
+      continue;
+    }
     for (const token of line.split(/[\s,]+/)) {
       if (!token) continue;
       const cidr = expandCidr(token, maxCidrSamples);
@@ -339,8 +345,55 @@ async function readResponseText(response, maxBytes) {
   return new TextDecoder().decode(merged);
 }
 
+// 反代源按国家标签筛：只留 `IP:端口#US...` 这类注释里带目标国家代码的行（zip.cm.edu.kg / countrymerge 格式）
+export function filterLinesByCountry(text, country) {
+  const code = String(country || "").trim().toUpperCase();
+  if (!code) return String(text || "");
+  const re = new RegExp(`(^|[^A-Z])${code}([^A-Z]|$)`);
+  return String(text || "")
+    .split(/\r?\n/)
+    .filter((line) => {
+      const hash = line.indexOf("#");
+      return hash >= 0 && re.test(line.slice(hash + 1).toUpperCase());
+    })
+    .join("\n");
+}
+
+// 源级别的后过滤：ports 只留指定端口（没写端口的按 443 算）；relayOnly 去掉混进来的 Cloudflare 官方段 IP
+export function applySourceFilters(candidates, source) {
+  if (typeof source !== "object" || !source) return candidates;
+  const ports = Array.isArray(source.ports) && source.ports.length ? new Set(source.ports.map(Number)) : null;
+  const cfRanges = source.relayOnly ? CLOUDFLARE_IPV4_RANGES.map(parseV4Cidr) : null;
+  return candidates.filter((candidate) => {
+    if (ports && !ports.has(Number(candidate.port) || 443)) return false;
+    if (cfRanges && isIPv4(candidate.address) && ipv4InRanges(candidate.address, cfRanges)) return false;
+    return true;
+  }).map((candidate) => (ports && !candidate.port ? { ...candidate, port: 443 } : candidate));
+}
+
+async function readLocalFile(path) {
+  const { readFile } = await import("node:fs/promises");
+  const buf = await readFile(path);
+  // FOFA 导出有时是 .gz（或手机上传时被压缩），按 gzip 魔数自动解压
+  if (buf[0] === 0x1f && buf[1] === 0x8b) {
+    const { gunzipSync } = await import("node:zlib");
+    return gunzipSync(buf).toString("utf8");
+  }
+  return buf.toString("utf8");
+}
+
+// 本地源：file 指向单个文件；dir 指向文件夹，读里面所有 .txt/.csv/.gz（手机网页直接上传 FOFA 导出即可）
+async function readLocalSource(source) {
+  if (source.file) return readLocalFile(source.file);
+  const { readdir } = await import("node:fs/promises");
+  const names = (await readdir(source.dir).catch(() => [])).filter((name) => /\.(txt|csv|gz)$/i.test(name)).sort();
+  const texts = await Promise.all(names.map((name) => readLocalFile(`${source.dir}/${name}`)));
+  return texts.join("\n");
+}
+
 async function fetchRemoteSource(source, { fetchImpl, maxSourceBytes }) {
-  const url = typeof source === "string" ? source : source.url;
+  const file = typeof source === "object" && source ? source.file || source.dir : "";
+  const url = typeof source === "string" ? source : source.url || file;
   const sourceName = getSourceName(source, url);
   const startedAt = Date.now();
   const fail = (error, status = 0) => ({
@@ -350,14 +403,22 @@ async function fetchRemoteSource(source, { fetchImpl, maxSourceBytes }) {
   if (!url) return fail("missing url");
 
   try {
-    // P0-1: 单源超时，挂掉的源不拖死整轮抓取；signal 透传给 fetchImpl，mock 忽略多余参数也不会炸
-    const signal = typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(DEFAULT_SOURCE_TIMEOUT_MS) : undefined;
-    const response = await fetchImpl(url, signal ? { signal } : undefined);
-    if (!response.ok) {
-      return fail(`HTTP ${response.status}`, response.status);
+    let body;
+    let status = 200;
+    if (file) {
+      // 仓库内文件或文件夹（如 sources/relay/fofa/，FOFA 导出的 CSV 直接传进去）
+      body = await (typeof source.readFileImpl === "function" ? source.readFileImpl(file) : readLocalSource(source));
+    } else {
+      // P0-1: 单源超时，挂掉的源不拖死整轮抓取；signal 透传给 fetchImpl，mock 忽略多余参数也不会炸
+      const signal = typeof AbortSignal.timeout === "function" ? AbortSignal.timeout(DEFAULT_SOURCE_TIMEOUT_MS) : undefined;
+      const response = await fetchImpl(url, signal ? { signal } : undefined);
+      if (!response.ok) {
+        return fail(`HTTP ${response.status}`, response.status);
+      }
+      status = response.status;
+      body = await readResponseText(response, getMaxBytes(source, maxSourceBytes));
     }
-
-    const body = await readResponseText(response, getMaxBytes(source, maxSourceBytes));
+    if (typeof source === "object" && source.country) body = filterLinesByCountry(body, source.country);
     const maxCidrSamples = typeof source === "object" && source.cidrSamples ? Number(source.cidrSamples) : DEFAULT_CIDR_SAMPLES;
     const minSpeed = typeof source === "object" && source.minSpeed ? Number(source.minSpeed) : DEFAULT_CSV_MIN_SPEED;
     const sourceType = getSourceType(source, url);
@@ -376,8 +437,9 @@ async function fetchRemoteSource(source, { fetchImpl, maxSourceBytes }) {
       }
     }
 
+    parsed = applySourceFilters(parsed, source);
     return {
-      health: { name: sourceName, ok: true, status: response.status, candidates: parsed.length, ms: Date.now() - startedAt },
+      health: { name: sourceName, ok: true, status, candidates: parsed.length, ms: Date.now() - startedAt },
       candidates: parsed,
     };
   } catch (error) {

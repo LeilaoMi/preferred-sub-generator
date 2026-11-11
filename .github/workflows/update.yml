@@ -78,6 +78,9 @@ jobs:
           VLESS_SECURITY: ${{ vars.VLESS_SECURITY }}
           ALLOW_RELAY: ${{ vars.ALLOW_RELAY }}
           EDGE_BLACKLIST: ${{ vars.EDGE_BLACKLIST }}
+          SUB_LANDING: ${{ vars.SUB_LANDING }}
+          CN_PROBE_MODE: ${{ vars.CN_PROBE_MODE }}
+          CN_PENDING_MAX: ${{ vars.CN_PENDING_MAX }}
           UPDATE_WEBHOOK_URL: ${{ secrets.UPDATE_WEBHOOK_URL }}
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
