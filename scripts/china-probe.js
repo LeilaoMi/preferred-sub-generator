@@ -159,6 +159,9 @@ const DEAD_MIN_TESTED = 3;
 // 每轮仍留一点额度给死网段（线路会变），也给好网段里没测过的 IP 一个固定份额
 const DEAD_EXPLORE_SHARE = 0.1;
 const GOOD_SUBNET_SHARE = 1 / 3;
+// 美国反代池（relay-* 源，已在美国过 trace）里没测过的，每轮固定给这么多额度，
+// 免得它们排在 300 个官方 IP 后面要轮好几天才轮到
+const RELAY_US_SHARE = 0.4;
 
 // 选目标：手动置顶 + 上次国内 ok 的（保持新鲜）优先；再给「有 IP 通过的 /24」里没测过的 IP 一份额度；
 // 其余按游标轮转，死网段只留少量探索额度，省下的额度给别的网段，保证整池定期都被测到
@@ -186,6 +189,11 @@ export function pickTargets(pool, previousEntries, cursor, budget, { skipPorts =
   ipOnly.filter((n) => n.source === "edge-manual").forEach(push);
   const keepFresh = Math.floor(budget / 3);
   ipOnly.filter((n) => okBefore.has(n.address)).slice(0, keepFresh).forEach(push);
+  const relayCap = out.length + Math.floor(budget * RELAY_US_SHARE);
+  for (const node of ipOnly) {
+    if (out.length >= relayCap) break;
+    if (node.pendingCn && String(node.source || "").startsWith("relay-") && !testedBefore.has(node.address) && !isDead(node.address)) push(node);
+  }
   const goodCap = out.length + Math.floor(budget * GOOD_SUBNET_SHARE);
   for (const node of ipOnly) {
     if (out.length >= goodCap) break;

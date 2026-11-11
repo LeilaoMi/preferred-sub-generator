@@ -97,6 +97,8 @@ Clash 的地区分组也按同一规则归类。
 | `CN_COMBO_TOP` | Variable | 每轮组合测的 IP 数，默认 10 |
 | `SUB_ROTATE_HOSTS` | Variable | `1`：直接订阅时，节点域名轮换为该运营商未被墙的 `CHECK_HOSTS`（这些域名须绑在同一个 edgetunnel 上；对 `sub://` 无效） |
 | `ALLOW_RELAY` | Variable | 默认放行社区反代 IP；`0` 只用 Cloudflare 官方 IPv4 |
+| `CN_PENDING_MAX` | Variable | 待国内验证的反代池上限，默认 500（美国反代排前面） |
+| `SUB_RELAY_BONUS_MS` | Variable | 反代 IP 国内实测通过时排序加分，默认 60（ms）；`0` 关掉 |
 | `EDGE_BLACKLIST` | Variable | 额外拉黑的网段，逗号分隔 CIDR |
 | `PUBLIC_CN_VERIFIED` | Variable | `1`：公开 `/cn-verified`，只含 IP、端口、延迟、成功率、机房 |
 | `COMMUNITY_POOL_URL` | Variable | 用别人公开的 `/cn-verified` 做冷启动，永远排在自己数据之后 |
@@ -113,7 +115,8 @@ Clash 的地区分组也按同一规则归类。
 4. 最近一次成功实测越旧越靠后（每 12 小时加罚 10ms，最多 60ms）；快照里超过 7 天没更新的名单不再用来兜底。
 5. 国内实测通过的排前面，然后是 `sources/edge/manual.txt` 里的手动置顶，不足 10 个再用过审池补齐。开了 `SUB_LANDING` 时：落地在白名单外的剔除，没有机房信息的（浏览器测速等）不算实测通过，也不用未实测的节点补齐，不够时退回国内快照。
 6. 每轮国内实测按 /24 网段分配额度：测过 3 个以上 IP 都不通的网段只留少量探索额度，有 IP 通过的网段里没测过的 IP 优先测。
-7. TLS 订阅只保留 TLS 端口（443、8443、2053、2083、2087、2096）。
+7. 美国反代池（`relay-*` 源，见 [docs/relay-us.md](docs/relay-us.md)）：先在 GitHub Actions 上用你的域名测 trace，活着且落地在白名单里的进待验证池（西海岸优先），每轮国内实测给没测过的反代 40% 额度；国内实测通过后排序加 60ms 分。
+8. TLS 订阅只保留 TLS 端口（443、8443、2053、2083、2087、2096）。
 
 定时任务的时间（北京时间，GitHub 经常推迟几十分钟到几小时）：Update 约 2:00 / 8:00 / 14:00 / 20:00，China Probe 每 2 小时的半点，Host Check 3:50 / 9:50 / 15:50 / 21:50。CI 每次提交跑全部测试。
 

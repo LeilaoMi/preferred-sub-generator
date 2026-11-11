@@ -2,6 +2,7 @@ import { installFetchTimeout } from "./lib/fetch-timeout.js";
 import { applyInstanceConfig } from "./lib/instance-config.js";
 import fs from "node:fs/promises";
 import { formatEdgeNodeName } from "../src/utils/colo.js";
+import { isAllowedLanding, resolveLanding } from "../src/utils/landing.js";
 import { getPortsForSecurity } from "../src/utils/ports.js";
 import { checkCandidates } from "./lib/check.js";
 import { collectCandidatesWithHealth, isIPv6 } from "./lib/candidates.js";
@@ -178,7 +179,27 @@ function previousFallbackCount(previousStatus) {
 
 // 社区反代源：IP 多为 Oracle/AWS 等中转，只对国内来源开放
 export function isRelaySource(source) {
-  return String(source || "").startsWith("cmliu");
+  return /^(cmliu|relay-)/.test(String(source || ""));
+}
+
+// relay-* 源（美国反代池）在美国是通的：先在 Actions 上用你的域名测一遍 trace，
+// 活着且落地机房在白名单里的才进国内待验证池；cmliu 源在美国连不上，照旧直接进池
+export function isUsCheckableRelay(source) {
+  return String(source || "").startsWith("relay-");
+}
+
+// 西海岸机房离国内近，同样活着的反代优先给国内实测
+const WEST_COAST = new Set(["LAX", "SJC", "SFO", "SEA", "PDX"]);
+
+export function rankRelayChecked(checked, landing) {
+  return checked
+    .filter((item) => isAllowedLanding(item.colo, landing))
+    .sort((a, b) => {
+      const wa = WEST_COAST.has(String(a.colo || "").toUpperCase()) ? 0 : 1;
+      const wb = WEST_COAST.has(String(b.colo || "").toUpperCase()) ? 0 : 1;
+      if (wa !== wb) return wa - wb;
+      return (Number(a.latency) || 0) - (Number(b.latency) || 0);
+    });
 }
 
 // 池上限语义：手动条目保留，但总数不能超 poolLimit；超出的部分砍排名最低的
@@ -206,6 +227,7 @@ export async function buildUpdatePayload({
   maxSourceBytes,
   versionRetention = DEFAULT_VERSION_RETENTION,
   poolLimit = MAX_POOL_NODES,
+  landing = resolveLanding(process.env),
 } = {}) {
   // 节点探测参数来自离散环境变量（对标竞品），不再解析模板 URI
   // 没配 VLESS_HOST / VLESS_SNI 时用 Cloudflare 自己的域名做通用初筛（与 cmliu 等做法一致，复刻零配置）
@@ -238,6 +260,21 @@ export async function buildUpdatePayload({
     concurrency: Number(process.env.CHECK_CONCURRENCY) || 64,
   });
   console.log(`US prefilter done: ${checked.length} reachable in ${Math.round((Date.now() - startedAt) / 1000)}s`);
+  // 美国反代池：同一套 trace 检查（要求 cf-ray，能拿到落地机房），只用来决定谁进国内待验证池
+  const relayUsCandidates = process.env.ALLOW_RELAY === "0"
+    ? []
+    : candidates.filter((candidate) => isUsCheckableRelay(candidate.source) && /^\d+\.\d+\.\d+\.\d+$/.test(candidate.address));
+  const relayChecked = relayUsCandidates.length
+    ? await checkCandidates(relayUsCandidates, [443], {
+      checkOne,
+      checkOptions: checkParams,
+      requireCfRay: true,
+      allowTcpOnly: false,
+      concurrency: Number(process.env.CHECK_CONCURRENCY) || 64,
+    })
+    : [];
+  const relayRanked = rankRelayChecked(aggregateCheckedResults(relayChecked), landing);
+  console.log(`US relay check: ${relayUsCandidates.length} candidates, ${relayChecked.length} alive, ${relayRanked.length} in landing`);
   const allAggregated = aggregateCheckedResults(checked);
   let aggregated = allAggregated.slice(0, poolLimit);
   // 手动置顶（manual.txt）是你在国内确认能用的 IP/域名：美国扫描机连不上也保留（标记未过审），
@@ -275,11 +312,19 @@ export async function buildUpdatePayload({
   // 反代 IP 大多只对国内来源开放，美国扫描机几乎都连不上。没过美国初筛的社区源 IPv4
   // 放进待国内验证池 CN_PENDING_IPS，由 china-probe 用国内三网探针验证；
   // 订阅只纳入其中国内实测 ok 的，未验证的永不进订阅。
-  const pendingLimit = Number(process.env.CN_PENDING_MAX) || 300;
+  const pendingLimit = Number(process.env.CN_PENDING_MAX) || 500;
   const pendingCn = [];
   if (process.env.ALLOW_RELAY !== "0") {
     const passed = new Set(nextBestIps.map((item) => item.address));
+    // 美国反代（已在美国过 trace + 落地白名单）排前面，带上机房
+    for (const item of relayRanked) {
+      if (pendingCn.length >= pendingLimit) break;
+      if (passed.has(item.address)) continue;
+      passed.add(item.address);
+      pendingCn.push({ address: item.address, port: item.port, ports: [item.port], name: `待验证 ${item.address}`, latency: item.latency, speed: null, colo: item.colo || "", edgeVerified: Boolean(item.colo), source: item.source, pendingCn: true });
+    }
     for (const candidate of candidates) {
+      if (isUsCheckableRelay(candidate.source)) continue;
       if (pendingCn.length >= pendingLimit) break;
       if (candidate.source === "edge-manual" || !isRelaySource(candidate.source)) continue;
       if (passed.has(candidate.address) || !/^\d+\.\d+\.\d+\.\d+$/.test(candidate.address)) continue;
@@ -305,6 +350,7 @@ export async function buildUpdatePayload({
     requireCfRay,
     allowTcpOnly,
     checked: checked.length,
+    relayUs: { candidates: relayUsCandidates.length, alive: relayChecked.length, inLanding: relayRanked.length },
     speedtestLocation: "GitHub Actions (US，仅初筛；排序以国内本机实测为准)",
     speedtestLocationNote: "colo/latency/speed 均为美国机房测速结果，国内实际接入节点地区以本地为准（CF Anycast 就近分配）",
     averageLatency: averageLatency(bestIps),

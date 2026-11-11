@@ -55,11 +55,11 @@ function round(value, digits) {
 
 // 有稳定排序分（RTT 分桶 + 远端机房/失败率加罚）时按它排，没有时按 RTT；分数相同保持原序
 function byRank(a, b) {
-  const ra = Number(a.score?.rank);
-  const rb = Number(b.score?.rank);
+  const ra = Number(a.score?.rank) - (a.bonus || 0);
+  const rb = Number(b.score?.rank) - (b.bonus || 0);
   if (Number.isFinite(ra) && Number.isFinite(rb) && ra !== rb) return ra - rb;
   if (Number.isFinite(ra) && Number.isFinite(rb)) return 0;
-  return a.rtt - b.rtt;
+  return (a.rtt - (a.bonus || 0)) - (b.rtt - (b.bonus || 0));
 }
 
 // 实测 RTT 淘汰门槛：超过这个值的节点对 Leo 的线路基本不可用。
@@ -192,6 +192,19 @@ export function withPreferredPort(node, portOrder) {
 const DEFAULT_MIN_NODES = 10;
 const PINNED_SOURCES = new Set(["edge-manual", "pinned"]);
 
+// 反代 IP（relay-* / cmliu 源）国内实测通过时排序加分：联通 5G 上官方 104 段常不通，
+// 美国反代出口跟着反代走（实测落洛杉矶），对 AI 站更稳。SUB_RELAY_BONUS_MS=0 关掉。
+const DEFAULT_RELAY_BONUS_MS = 60;
+export function readRelayBonusMs(env = {}) {
+  const raw = env.SUB_RELAY_BONUS_MS;
+  if (raw === undefined || raw === null || String(raw).trim() === "") return DEFAULT_RELAY_BONUS_MS;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? n : DEFAULT_RELAY_BONUS_MS;
+}
+export function isRelayNode(node) {
+  return /^(cmliu|relay-)/.test(String(node?.source || ""));
+}
+
 export function readMinNodes(env = {}) {
   const n = Number(env.SUB_MIN_NODES);
   return Number.isFinite(n) && n >= 0 ? Math.floor(n) : DEFAULT_MIN_NODES;
@@ -204,13 +217,14 @@ export function selectVerifiedNodes(nodes, scores, { limit, minNodes, env = {}, 
   const cap = Number.isFinite(Number(limit)) && Number(limit) > 0 ? Number(limit) : list.length;
 
   const isDead = (node) => scores?.get(node?.address)?.unreachable === true;
+  const relayBonus = readRelayBonusMs(env);
   const measured = [];
   const pinned = [];
   const rest = [];
   for (const node of list) {
     if (isDead(node)) continue;
     const score = scores?.get(node?.address);
-    if (isMeasuredOk(score, dropMs)) measured.push({ node, rtt: Number(score.rtt), score });
+    if (isMeasuredOk(score, dropMs)) measured.push({ node, rtt: Number(score.rtt), score, bonus: isRelayNode(node) ? relayBonus : 0 });
     else if (PINNED_SOURCES.has(node?.source)) pinned.push(node);
     else rest.push(node);
   }
