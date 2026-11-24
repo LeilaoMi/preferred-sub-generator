@@ -15,6 +15,7 @@
 | `relay-us-nirevil` | NiREvil/vless `country_proxies/US.txt`（`IP 端口` 两列格式） |
 | `relay-us-cmliu-dns` | `ProxyIP.US.CMLiussss.net` 的 A 记录（经 dns.google 解析） |
 | `relay-us-fofa` | 仓库内 `sources/relay/fofa/` 目录，读取其中全部 `.txt` / `.csv` / `.gz` |
+| `relay-us-netlas` | 仓库内 `sources/relay/netlas/` 目录，Netlas（海外测绘平台）导出，格式同上 |
 
 所有 `relay-*` 源都会剔除混入的 Cloudflare 官方段 IP，只保留 443 端口的 IPv4。设 Actions 变量 `ALLOW_RELAY=0` 可整体关闭。
 
@@ -35,5 +36,15 @@
 2. 导出 CSV（免费账号每次最多 2990 行，字段不用裁剪）。
 3. 手机浏览器打开仓库 → `sources/relay/fofa/` → **Add file → Upload files** → 选择刚导出的文件 → **Commit changes**。
 4. 无需去重或改格式：Update 会从文件中提取全部 IP，失效的在美国初筛中自动淘汰。旧文件可删可留。
+
+## Netlas 数据（FOFA 的海外补充）
+
+查询语句（Community 免费版单次最多 200 条，按 IP 段切片导出，例如追加 `AND ip:"64.0.0.0/8"`）：
+
+```text
+http.headers.server:"cloudflare" AND port:443 AND http.status_code:403 AND geo.country:US AND host_type:ip
+```
+
+导出的 IP 列表放进 `sources/relay/netlas/`，其余流程与 FOFA 相同。注意 Netlas 的 ASN 排除语法不生效，官方段由 Update 自动剔除。
 
 不更新也能运行：其余四个源由社区自动维护，FOFA 只是额外补充。
