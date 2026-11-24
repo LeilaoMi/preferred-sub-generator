@@ -137,5 +137,15 @@
     ],
     "relayOnly": true,
     "dir": "sources/relay/fofa"
+  },
+  {
+    "name": "relay-us-netlas",
+    "type": "scrape",
+    "relay": true,
+    "ports": [
+      443
+    ],
+    "relayOnly": true,
+    "dir": "sources/relay/netlas"
   }
 ]
