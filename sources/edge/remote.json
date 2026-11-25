@@ -147,5 +147,16 @@
     ],
     "relayOnly": true,
     "dir": "sources/relay/netlas"
+  },
+  {
+    "name": "relay-us-fission",
+    "url": "https://raw.githubusercontent.com/LeilaoMi/CloudflareCDNFission/main/output/ips.txt",
+    "type": "scrape",
+    "relay": true,
+    "ports": [
+      443
+    ],
+    "relayOnly": true,
+    "repo": "LeilaoMi/preferred-sub-generator"
   }
 ]
