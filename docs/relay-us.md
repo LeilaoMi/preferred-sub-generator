@@ -16,6 +16,7 @@
 | `relay-us-cmliu-dns` | `ProxyIP.US.CMLiussss.net` 的 A 记录（经 dns.google 解析） |
 | `relay-us-fofa` | 仓库内 `sources/relay/fofa/` 目录，读取其中全部 `.txt` / `.csv` / `.gz` |
 | `relay-us-netlas` | 仓库内 `sources/relay/netlas/` 目录，Netlas（海外测绘平台）导出，格式同上 |
+| `relay-us-fission` | [CloudflareCDNFission](https://github.com/LeilaoMi/CloudflareCDNFission) 每天自动采集的 `output/ips.txt`（Netlas 切片 + 同 IP 域名裂变，已剔除官方段），只在本仓库启用 |
 
 所有 `relay-*` 源都会剔除混入的 Cloudflare 官方段 IP，只保留 443 端口的 IPv4。设 Actions 变量 `ALLOW_RELAY=0` 可整体关闭。
 
